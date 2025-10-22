@@ -25,6 +25,7 @@ class Settings(BaseSettings):
         "\"https://site1.moralis-nodes.com/eth/231746d238334c139d70af0f910d5563\","  # noqa: E501
         "\"https://site2.moralis-nodes.com/eth/231746d238334c139d70af0f910d5563\"]"
     )
+    BALANCE_SOURCE: str = "auto"  # auto | rpc | moralis
     POSITION_FRACTION: float = 0.005
     POSITION_USD_CEIL: float = 9.0
     MAX_SPEND_USD_PER_DAY: float = 8.0
