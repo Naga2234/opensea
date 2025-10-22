@@ -1,0 +1,107 @@
+<!doctype html><html><head>
+<meta charset="utf-8"/>
+<link rel="icon" href="/static/favicon.svg">
+<title>PRO‑SAFE v2.7 (Moralis — Modes & UX)</title>
+<link rel="stylesheet" href="/static/style.css"/>
+</head><body>
+<header class="page-header">
+  <div>
+    <h1>PRO‑SAFE v2.7</h1>
+    <p class="subtitle">Moralis Full (Polygon)</p>
+  </div>
+  <div class="header-meta">
+    <span class="meta-pill">Dashboard</span>
+    <span class="meta-pill">UX refresh</span>
+  </div>
+</header>
+
+<div class="grid">
+  <div class="card">
+    <div class="pill-grid">
+      <div class="pill">Адрес: <b id="addr">—</b></div>
+      <div class="pill">Сеть: <b id="chain">—</b></div>
+      <div class="pill">EXEC: <b id="mode">—</b></div>
+      <div class="pill">Риск: <b id="riskCur">—</b></div>
+      <div class="pill">LIVE: <b id="live">—</b></div>
+      <div class="pill">Баланс: <b id="bal">—</b> (<span id="usd">—</span>$) <span id="balSrcBadge" class="badge"></span></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="label">Быстрые действия</div>
+    <div class="row">
+      <button class="btn" id="rpc">Проверить RPC</button>
+      <button class="btn" id="test">Тест</button>
+      <select id="modeSel" class="input-control"><option value="paper">paper</option><option value="live">live</option><option value="auto">auto</option></select>
+      <button class="btn" id="modeSave">Сохранить режим</button>
+      <button class="btn accent" id="start">Старт</button>
+      <button class="btn ghost" id="stop">Стоп</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Профили риска</h3>
+    <div class="row">
+      <select id="riskSel" class="input-control">
+        <option value="conservative">Консервативный</option>
+        <option value="balanced" selected>Сбалансированный</option>
+        <option value="aggressive">Агрессивный</option>
+      </select>
+      <button class="btn" id="riskSave">Применить</button>
+    </div>
+    <div id="riskDesc" class="muted" style="margin-top:6px">Сбалансировано: стандартные лимиты, средний размер позиции.</div>
+  </div>
+
+  <div class="card">
+    <h3>OpenSea (для LIVE)</h3>
+    <div class="row"><input id="osKey" class="input-control" style="flex:1" placeholder="X-API-KEY"/><button class="btn" id="osSave">Сохранить ключ</button></div>
+  </div>
+
+  <div class="card">
+    <h3>Сеть и пресеты</h3>
+    <div class="row">
+      <select id="chainSel" class="input-control"><option value="eth">Ethereum</option><option value="polygon" selected>Polygon</option></select>
+      <button class="btn" id="chainSave">Сохранить сеть</button>
+      <button class="btn" id="presetPoly" onclick="fetch('/api/preset_lowcap_polygon',{method:'POST'}).then(r=>r.json()).then(ap)">Low‑Cap (Polygon)</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Источник баланса</h3>
+    <div class="row">
+      <select id="balSrc" class="input-control">
+        <option value="auto" selected>auto</option>
+        <option value="rpc">rpc</option>
+        <option value="moralis">moralis</option>
+      </select>
+      <button class="btn" id="balSrcSave">Сохранить</button>
+      <span class="muted">auto: сначала RPC, если пусто — Moralis (экономит CU)</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Контракты</h3>
+    <textarea id="contracts" class="input-control area"></textarea>
+    <div class="row"><button class="btn" id="applyContracts">Применить</button></div>
+  </div>
+
+  <div class="card" style="grid-column:1 / -1">
+    <h3>KPI / Risk</h3>
+    <div id="nl" class="pill">Статистика появится после первых сделок.</div>
+    <div class="row">
+      <div style="flex:1">undercut <span id="wr_u">0%</span><div class="bar"><i id="bar_u"></i></div></div>
+      <div style="flex:1">mean_revert <span id="wr_mr">0%</span><div class="bar"><i id="bar_mr"></i></div></div>
+      <div style="flex:1">momentum <span id="wr_m">0%</span><div class="bar"><i id="bar_m"></i></div></div>
+      <div style="flex:1">hybrid <span id="wr_h">0%</span><div class="bar"><i id="bar_h"></i></div></div>
+    </div>
+    <div class="muted" style="margin-top:6px">Лучший режим/стратегия: <b id="best">—</b></div>
+  </div>
+
+  <div class="card" style="grid-column:1 / -1">
+    <h3>Лог</h3>
+    <div id="log" class="log-panel" aria-live="polite"></div>
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body></html>
