@@ -2,7 +2,14 @@ from fastapi import FastAPI, Body
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from ..runtime import log, get_logs
-from ..config import settings, contracts, rpc_urls
+from ..config import (
+    settings,
+    contracts,
+    rpc_urls,
+    available_strategies,
+    normalize_strategy,
+    strategy_state,
+)
 from ..pricing import price_usd
 from ..executor import Web3Helper, LiveNotConfigured
 from ..engine import Engine
@@ -93,6 +100,36 @@ def api_mode_set(body: dict = Body(...)):
     if m not in ("paper","live","auto"): return JSONResponse({"ok":False,"error":"bad mode"}, status_code=400)
     _save_env({"MODE": m}); settings.MODE=m; log(f"[MODE] {m}"); return {"ok":True, "mode": m}
 
+
+@app.get("/api/strategy_status")
+def api_strategy_status():
+    return {"ok": True, "strategy": strategy_state()}
+
+
+@app.post("/api/strategy_set")
+def api_strategy_set(body: dict = Body(...)):
+    payload = body or {}
+    mode = (payload.get("mode") or payload.get("MODE") or settings.STRATEGY_MODE or "auto").lower()
+    if mode not in ("auto", "manual"):
+        return JSONResponse({"ok": False, "error": "bad mode"}, status_code=400)
+    manual_raw = payload.get("strategy") or payload.get("manual") or payload.get("MANUAL_STRATEGY")
+    manual = normalize_strategy(manual_raw if manual_raw is not None else settings.MANUAL_STRATEGY)
+    updates = {"STRATEGY_MODE": mode}
+    settings.STRATEGY_MODE = mode
+    if mode == "manual":
+        if not manual:
+            return JSONResponse({"ok": False, "error": "manual strategy required"}, status_code=400)
+        updates["MANUAL_STRATEGY"] = manual
+        settings.MANUAL_STRATEGY = manual
+        log(f"[STRATEGY] ручной режим: {manual}")
+    else:
+        if manual:
+            updates["MANUAL_STRATEGY"] = manual
+            settings.MANUAL_STRATEGY = manual
+        log("[STRATEGY] режим: авто")
+    _save_env(updates)
+    return {"ok": True, "strategy": strategy_state(), "available": available_strategies()}
+
 @app.post("/api/chain_set")
 def api_chain_set(body: dict = Body(...)):
     chain=(body or {}).get("chain","eth").lower()
@@ -153,8 +190,8 @@ def api_moralis_usage(force: bool = False):
     return {"ok": usage is not None, "usage": usage}
 
 @app.get("/api/settings")
-def api_settings(): 
-    return {"ok":True, "settings": {k:getattr(settings,k) for k in ["MODE","CHAIN","ADDRESS","OPENSEA_API_KEY","RPC_URL","RPC_URLS","CONTRACTS","BALANCE_SOURCE","RISK_PROFILE"]}}
+def api_settings():
+    return {"ok":True, "settings": {k:getattr(settings,k) for k in ["MODE","CHAIN","ADDRESS","OPENSEA_API_KEY","RPC_URL","RPC_URLS","CONTRACTS","BALANCE_SOURCE","RISK_PROFILE","STRATEGY_MODE","MANUAL_STRATEGY"]}}
 
 @app.get("/api/status")
 def api_status():

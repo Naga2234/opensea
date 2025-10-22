@@ -1,4 +1,9 @@
+from typing import Optional
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+AVAILABLE_STRATEGIES = ["undercut", "mean_revert", "momentum", "hybrid"]
+
 
 class Settings(BaseSettings):
     OPENSEA_API_KEY: str = "b6c32aadd9744bee9483c4637b664532"
@@ -26,6 +31,8 @@ class Settings(BaseSettings):
     MAX_OPEN_POSITIONS: int = 1
     USD_PROFIT_MIN: float = 0.01
     AUTO_STOP_PROFIT_USD: float = 0.15
+    STRATEGY_MODE: str = "auto"  # auto | manual
+    MANUAL_STRATEGY: str = "undercut"
     GAS_MAX_FEE_GWEI: float = 60.0
     GAS_PRIORITY_GWEI: float = 1.5
     CONTRACTS: str = (
@@ -53,3 +60,31 @@ def rpc_urls():
         return list(json.loads(settings.RPC_URLS))
     except Exception:
         return [settings.RPC_URL] if settings.RPC_URL else []
+
+
+def available_strategies():
+    return list(AVAILABLE_STRATEGIES)
+
+
+def normalize_strategy(name: Optional[str]) -> Optional[str]:
+    if not name:
+        return None
+    candidate = str(name).strip()
+    if not candidate:
+        return None
+    for item in AVAILABLE_STRATEGIES:
+        if item.lower() == candidate.lower():
+            return item
+    return None
+
+
+def strategy_state():
+    mode = (getattr(settings, "STRATEGY_MODE", "auto") or "auto").lower()
+    manual = normalize_strategy(getattr(settings, "MANUAL_STRATEGY", None))
+    current = manual if mode == "manual" and manual else None
+    return {
+        "mode": "manual" if mode == "manual" else "auto",
+        "manual": manual,
+        "available": available_strategies(),
+        "current": current,
+    }
