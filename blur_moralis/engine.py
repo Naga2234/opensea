@@ -177,16 +177,19 @@ class Engine:
                     short_c=str(c) if c else "—"
                 register_trade_event("scanning", contract=c, note=f"Проверяем {short_c}", action="scan")
                 log(f"[ENGINE][SCAN] {short_c} — проверка сигнала")
+                log(f"[STATUS][RUNNING][SCAN] Просмотр предложения по {short_c}")
                 if random.random()<0.1:
                     _ = recent_trades(c, limit=1)
                 trigger=random.random()
                 if trigger>=0.05:
                     log(f"[ENGINE][WAIT] {short_c} — сигнала нет")
                     register_trade_event("waiting", contract=c, note=f"Сигналов нет по {short_c}", action="wait")
+                    log(f"[STATUS][RUNNING][SCAN] {short_c} — сигналов нет, двигаемся дальше")
                     time.sleep(0.1)
                     continue
                 strategy=random.choice(["undercut","mean_revert","momentum","hybrid"])
                 register_trade_event("signal", contract=c, strategy=strategy, note=f"Сигнал {strategy} обнаружен", action="signal")
+                log(f"[STATUS][RUNNING][SIGNAL] {short_c} — стратегия {strategy}")
                 edge=abs(random.gauss(0.008,0.006))
                 fee=0.025
                 gas_usd = 0.02 if settings.CHAIN=='polygon' else 1.0
@@ -195,6 +198,7 @@ class Engine:
                     log(f"[EV] skip {strategy} c={short_c} edge={edge:.4f} ev={ev:.4f}")
                     register_trade_event("skipped", contract=c, strategy=strategy,
                                           note=f"EV={ev:.4f} edge={edge:.4f}", action="skip")
+                    log(f"[STATUS][RUNNING][SKIP] {short_c} — стратегия {strategy}, edge={edge:.4f}, EV={ev:.4f}; пропускаем")
                     time.sleep(0.1)
                     continue
                 bal_usd=self._usd_balance()
@@ -205,12 +209,19 @@ class Engine:
                 trade={"contract":c,"token_id":"1","strategy":strategy,"edge":edge,"size_usd":size_usd}
                 register_trade_event("entering", contract=c, strategy=strategy, size_usd=size_usd,
                                       note=f"Готовим вход {strategy} на {short_c}", action="enter")
+                chain_label = (settings.CHAIN or "CHAIN").upper()
+                if px:
+                    log(f"[STATUS][RUNNING][ENTER] {short_c} — готовим сделку {strategy} на ${size_usd:.2f} (~{size_eth:.4f} {chain_label}) по цене ${px:.2f}")
+                else:
+                    log(f"[STATUS][RUNNING][ENTER] {short_c} — готовим сделку {strategy} на ${size_usd:.2f} (~{size_eth:.4f} {chain_label})")
                 if settings.MODE in ("live","auto") and hasattr(self._ex,"buy_token"):
                     try:
+                        log(f"[STATUS][RUNNING][BUY] {short_c} — отправляем заявку в OpenSea на ${size_usd:.2f} (~{size_eth:.4f} {chain_label})")
                         h=self._ex.buy_token(trade["contract"], trade["token_id"])
                         log(f"[LIVE][OK] {h} {trade}")
                         register_trade_event("filled", contract=c, strategy=strategy, size_usd=size_usd,
                                               note=f"TX {h}", action="buy")
+                        log(f"[STATUS][RUNNING][BUY] {short_c} — заявка подтверждена, TX={h}")
                         est_profit=max(0.0, size_usd*edge*0.5)
                         if est_profit>0:
                             risk["last_trade_profit_usd"]=est_profit
@@ -219,14 +230,16 @@ class Engine:
                             register_trade_event("win", contract=c, strategy=strategy, size_usd=size_usd,
                                                   pnl_usd=est_profit,
                                                   note=f"Оценка профита ${est_profit:.2f}", action="result")
+                            log(f"[STATUS][RUNNING][RESULT] {short_c} — ожидаемый профит ${est_profit:.2f}")
                     except Exception as e:
                         log(f"[LIVE][ERR] {e} {trade}")
                         register_trade_event("error", contract=c, strategy=strategy, size_usd=size_usd,
                                               note=str(e), action="error")
+                        log(f"[STATUS][RUNNING][ERROR] {short_c} — не удалось купить: {e}")
                 else:
                     PaperExecutor().buy(trade, size_eth)
-                    chain_label = (settings.CHAIN or "CHAIN").upper()
                     log(f"[TRADE][PAPER][BUY] {strategy} {short_c} size=${size_usd:.2f} (~{size_eth:.4f} {chain_label} unit)")
+                    log(f"[STATUS][RUNNING][BUY] {short_c} — бумажная покупка {strategy} на ${size_usd:.2f} (~{size_eth:.4f} {chain_label})")
                     risk["spend_today_usd"]+=size_usd
                     ok = random.random() < (0.52 + min(0.05, edge*10))
                     if ok:
@@ -240,6 +253,7 @@ class Engine:
                                               pnl_usd=profit,
                                               note=f"Профит ${profit:.2f}", action="sell")
                         log(f"[TRADE][RESULT][WIN] {strategy} {short_c} +${profit:.2f}")
+                        log(f"[STATUS][RUNNING][SELL] {short_c} — фиксация прибыли ${profit:.2f} по стратегии {strategy}")
                     else:
                         stats["by_strategy"][strategy]["losses"]+=1
                         loss=min(0.5, size_usd*0.5)
@@ -249,6 +263,7 @@ class Engine:
                                               pnl_usd=-loss,
                                               note=f"Убыток ${loss:.2f}", action="sell")
                         log(f"[TRADE][RESULT][LOSS] {strategy} {short_c} -${loss:.2f}")
+                        log(f"[STATUS][RUNNING][SELL] {short_c} — фиксация убытка ${loss:.2f} по стратегии {strategy}")
                         risk["loss_streak"]=risk.get("loss_streak",0)+1
                         self._check_auto_stop()
                 if self._stop: break
