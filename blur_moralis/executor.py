@@ -1,4 +1,8 @@
+from typing import Optional
+
 from web3 import Web3
+from web3.middleware import geth_poa_middleware
+
 from .runtime import log
 from .config import settings
 from .live_exec import OpenSeaExecutor, LiveNotConfigured
@@ -6,14 +10,48 @@ from .live_exec import OpenSeaExecutor, LiveNotConfigured
 class Web3Helper:
     def __init__(self, rpc_url:str):
         self.rpc_url=rpc_url
-        self.w3=Web3(Web3.HTTPProvider(rpc_url)) if rpc_url else None
+        self.w3=self._make_web3(rpc_url)
+
+    def _make_web3(self, rpc_url: Optional[str]) -> Optional[Web3]:
+        if not rpc_url:
+            return None
+        try:
+            if rpc_url.lower().startswith(("ws://", "wss://")):
+                provider = Web3.WebsocketProvider(rpc_url, websocket_kwargs={"max_size": 2 ** 25})
+            else:
+                provider = Web3.HTTPProvider(rpc_url, request_kwargs={"timeout": 20})
+            w3 = Web3(provider)
+            try:
+                w3.middleware_onion.inject(geth_poa_middleware, layer=0)
+            except ValueError:
+                pass
+            return w3
+        except Exception as exc:
+            log(f"[RPC][ERR] failed to init provider {rpc_url}: {exc}")
+            return None
+
     def is_ok(self)->bool:
-        try: return bool(self.w3 and self.w3.is_connected())
-        except: return False
+        if not self.w3:
+            return False
+        try:
+            if self.w3.is_connected():
+                return True
+        except Exception:
+            pass
+        try:
+            self.w3.eth.block_number
+            return True
+        except Exception:
+            return False
+
     def balance(self, address:str)->int:
-        if not self.is_ok() or not address: return 0
-        try: return self.w3.eth.get_balance(Web3.to_checksum_address(address))
-        except: return 0
+        if not self.w3 or not address:
+            return 0
+        try:
+            return self.w3.eth.get_balance(Web3.to_checksum_address(address))
+        except Exception as exc:
+            log(f"[RPC][ERR] balance fetch failed via {self.rpc_url}: {exc}")
+            return 0
 
 class PaperExecutor:
     def buy(self, trade, size_eth: float):
