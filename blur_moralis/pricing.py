@@ -2,7 +2,7 @@ import httpx, time
 from http import HTTPStatus
 from .runtime import log
 
-_cache={}; _ts=0.0; _cooldown_until=0.0
+_cache={}; _ts=0.0; _cooldown_until=0.0; _last_rate_limit_log=0.0
 _fallback_prices={"eth": 1800.0, "polygon": 0.65}
 
 def _cached_value(key:str)->float:
@@ -15,7 +15,7 @@ def _cached_value(key:str)->float:
         return float(_fallback_prices.get(key, 0.0))
 
 def price_usd(chain:str)->float:
-    global _cache,_ts,_cooldown_until
+    global _cache,_ts,_cooldown_until,_last_rate_limit_log
     now=time.time()
     key='eth' if chain in ('eth','ethereum') else 'polygon'
     cached=_cache.get(key)
@@ -49,8 +49,11 @@ def price_usd(chain:str)->float:
                 wait=float(retry_after)
             except (TypeError, ValueError):
                 wait=60.0
-            _cooldown_until=time.time()+max(wait,30.0)
-            log(f"[PRICE] coingecko rate limited (HTTP 429), reusing cached price for {key}.")
+            now=time.time()
+            _cooldown_until=now+max(wait,30.0)
+            if now-_last_rate_limit_log>=30.0:
+                log(f"[PRICE] coingecko rate limited (HTTP 429), reusing cached price for {key}.")
+                _last_rate_limit_log=now
             return _cached_value(key)
         log(f"[PRICE] coingecko error: {e}")
         return _cached_value(key)

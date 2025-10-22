@@ -6,6 +6,7 @@ from .runtime import log
 _last_call_ts = {}  # key -> ts
 _usage_cache: Dict[str, Any] = {"data": None, "fingerprint": None}
 _last_usage_log_ts: float = 0.0
+_balance_cache: Dict[str, int] = {}
 
 def _allow(key: str, *, gap: Optional[int] = None) -> bool:
     now=time.time()
@@ -33,8 +34,11 @@ def native_balance(address:str)->Optional[int]:
     Rate-limited by MORALIS_RATE_LIMIT_SEC to save CU.
     """
     key=f"bal:{address}:{_chain_param()}"
+    cached=_balance_cache.get(key)
+    if not address:
+        return cached
     if not _allow(key):
-        return None  # skip to save CU
+        return cached  # skip to save CU
     try:
         with _client() as c:
             r=c.get(f"https://deep-index.moralis.io/api/v2/{address}/balance", params={"chain": _chain_param()})
@@ -42,10 +46,11 @@ def native_balance(address:str)->Optional[int]:
             data=r.json()
             bal=int(data.get("balance") or 0)
             log(f"[MORALIS] balance ok {address[:8]}… -> {bal}")
+            _balance_cache[key]=bal
             return bal
     except Exception as e:
         log(f"[MORALIS][ERR] balance: {e}")
-        return None
+        return cached
 
 def recent_trades(contract:str, limit:int=2)->List[Dict[str,Any]]:
     """
