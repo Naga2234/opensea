@@ -61,6 +61,21 @@
   </div>
 
   <div class="card">
+    <h3>Стратегии</h3>
+    <div class="row">
+      <select id="strategySel" class="input-control">
+        <option value="auto" selected>Авто (переключение)</option>
+        <option value="undercut">undercut</option>
+        <option value="mean_revert">mean_revert</option>
+        <option value="momentum">momentum</option>
+        <option value="hybrid">hybrid</option>
+      </select>
+      <button class="btn" id="strategySave">Применить</button>
+    </div>
+    <div class="muted" id="strategyHint">Авто: движок сам выбирает подходящую стратегию.</div>
+  </div>
+
+  <div class="card">
     <h3>Профили риска</h3>
     <div class="row">
       <select id="riskSel" class="input-control">

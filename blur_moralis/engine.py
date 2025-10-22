@@ -1,7 +1,14 @@
 import threading, time, random
 from typing import Optional
 from .runtime import log
-from .config import settings, contracts, rpc_urls
+from .config import (
+    settings,
+    contracts,
+    rpc_urls,
+    available_strategies,
+    normalize_strategy,
+    strategy_state,
+)
 from .executor import Web3Helper, make_executor, PaperExecutor, LiveNotConfigured
 from .pricing import price_usd
 from .moralis_api import recent_trades
@@ -24,6 +31,9 @@ class Engine:
         self._started_at=None
         self._stopped_at=None
         self._last_heartbeat=None
+        self._warned_bad_strategy=False
+        self._warned_no_strategy=False
+        self._last_strategy_announce=None
     def _validate_live_ready(self):
         if settings.MODE not in ("live", "auto"):
             return
@@ -108,6 +118,7 @@ class Engine:
                 "ts": risk.get("last_trade_ts"),
                 "closed": risk.get("last_trade_closed"),
             },
+            "strategy": strategy_state(),
         }
     def _connect(self):
         urls=[settings.RPC_URL]+(rpc_urls() or [])
@@ -152,6 +163,37 @@ class Engine:
             risk["auto_stop_reason"]=reason
             self.stop(reason)
 
+    def _select_strategy(self)->tuple[Optional[str], str]:
+        available=available_strategies()
+        if not available:
+            if not self._warned_no_strategy:
+                log("[СТРАТЕГИЯ] список стратегий пуст, требуется настройка")
+                self._warned_no_strategy=True
+            return None, "none"
+        self._warned_no_strategy=False
+        mode=(getattr(settings, "STRATEGY_MODE", "auto") or "auto").lower()
+        manual=normalize_strategy(getattr(settings, "MANUAL_STRATEGY", None))
+        if mode=="manual":
+            if manual:
+                self._warned_bad_strategy=False
+                return manual, "manual"
+            if not self._warned_bad_strategy:
+                log("[СТРАТЕГИЯ] ручной режим без выбранной стратегии — возвращаемся к авто")
+                self._warned_bad_strategy=True
+        else:
+            self._warned_bad_strategy=False
+        return random.choice(available), "auto"
+
+    def _announce_strategy(self, mode: str, strategy: Optional[str]):
+        key=(mode, strategy if mode=="manual" else None)
+        if self._last_strategy_announce==key:
+            return
+        self._last_strategy_announce=key
+        if mode=="manual" and strategy:
+            log(f"[СТРАТЕГИЯ] ручной режим активен — используем только {strategy}")
+        elif mode=="auto":
+            log("[СТРАТЕГИЯ] автоматический выбор — набор стратегий переключается автоматически")
+
     def run(self):
         try:
             if not self._w3 or not self._ex:
@@ -187,18 +229,37 @@ class Engine:
                     log(f"[STATUS][RUNNING][SCAN] {short_c} — сигналов нет, двигаемся дальше")
                     time.sleep(0.1)
                     continue
-                strategy=random.choice(["undercut","mean_revert","momentum","hybrid"])
+                strategy, strategy_mode = self._select_strategy()
+                if not strategy:
+                    log(f"[СТРАТЕГИЯ][СКИП] {short_c} — нет доступных стратегий, ждём обновления настроек")
+                    register_trade_event("skipped", contract=c, strategy=None,
+                                          note="Нет активных стратегий", action="skip")
+                    time.sleep(0.1)
+                    continue
+                self._announce_strategy(strategy_mode, strategy)
                 register_trade_event("signal", contract=c, strategy=strategy, note=f"Сигнал {strategy} обнаружен", action="signal")
                 log(f"[STATUS][RUNNING][SIGNAL] {short_c} — стратегия {strategy}")
                 edge=abs(random.gauss(0.008,0.006))
                 fee=0.025
                 gas_usd = 0.02 if settings.CHAIN=='polygon' else 1.0
                 ev=edge - fee - (gas_usd / max(self._usd_balance(), 50.0))
-                if ev<=0 or (edge*100.0)<(settings.USD_PROFIT_MIN or 0.01):
-                    log(f"[EV] skip {strategy} c={short_c} edge={edge:.4f} ev={ev:.4f}")
-                    register_trade_event("skipped", contract=c, strategy=strategy,
-                                          note=f"EV={ev:.4f} edge={edge:.4f}", action="skip")
-                    log(f"[STATUS][RUNNING][SKIP] {short_c} — стратегия {strategy}, edge={edge:.4f}, EV={ev:.4f}; пропускаем")
+                edge_pct=edge*100.0
+                fee_pct=fee*100.0
+                usd_min=settings.USD_PROFIT_MIN or 0.01
+                if ev<=0 or edge_pct<usd_min:
+                    skip_reason=(
+                        f"стратегия {strategy}: edge={edge_pct:.2f}% не покрывает комиссию {fee_pct:.2f}% "
+                        f"и расходы на газ ${gas_usd:.2f}, минимум для входа {usd_min:.2f}%; ожидаемая ценность сделки EV={ev:.4f}"
+                    )
+                    log(f"[РЕШЕНИЕ][SKIP] {short_c} — {skip_reason}. Пропускаем сигнал")
+                    register_trade_event(
+                        "skipped",
+                        contract=c,
+                        strategy=strategy,
+                        note=f"Пропуск: edge={edge_pct:.2f}% EV={ev:.4f}",
+                        action="skip",
+                    )
+                    log(f"[STATUS][RUNNING][SKIP] {short_c} — {skip_reason}; двигаемся дальше")
                     time.sleep(0.1)
                     continue
                 bal_usd=self._usd_balance()
@@ -208,8 +269,14 @@ class Engine:
                 size_eth=size_usd/(px or 1.0)
                 trade={"contract":c,"token_id":"1","strategy":strategy,"edge":edge,"size_usd":size_usd}
                 register_trade_event("entering", contract=c, strategy=strategy, size_usd=size_usd,
-                                      note=f"Готовим вход {strategy} на {short_c}", action="enter")
+                                      note=f"Готовим вход {strategy}: edge {edge_pct:.2f}%", action="enter")
                 chain_label = (settings.CHAIN or "CHAIN").upper()
+                est_profit=max(0.0, size_usd*edge*0.5)
+                decision_text=(
+                    f"стратегия {strategy}: edge={edge_pct:.2f}% даёт положительный EV={ev:.4f}. "
+                    f"Планируем объём ${size_usd:.2f} (~{size_eth:.4f} {chain_label}), ожидаемая прибыль ${est_profit:.2f}."
+                )
+                log(f"[РЕШЕНИЕ][BUY] {short_c} — {decision_text}")
                 if px:
                     log(f"[STATUS][RUNNING][ENTER] {short_c} — готовим сделку {strategy} на ${size_usd:.2f} (~{size_eth:.4f} {chain_label}) по цене ${px:.2f}")
                 else:
@@ -222,7 +289,6 @@ class Engine:
                         register_trade_event("filled", contract=c, strategy=strategy, size_usd=size_usd,
                                               note=f"TX {h}", action="buy")
                         log(f"[STATUS][RUNNING][BUY] {short_c} — заявка подтверждена, TX={h}")
-                        est_profit=max(0.0, size_usd*edge*0.5)
                         if est_profit>0:
                             risk["last_trade_profit_usd"]=est_profit
                             risk["pnl_today_usd"]+=est_profit

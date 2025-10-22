@@ -10,6 +10,7 @@ let usageTimer=null;
 let logCursor=0;
 let lastUsageHash=null;
 let lastUsageLogTs=0;
+let strategyStatus=null;
 
 function setLoading(button, loading){
   if(!button) return;
@@ -176,6 +177,52 @@ const tradeProgressMap={
   error:85,
 };
 
+const strategyDisplayNames={
+  auto:'Авто (переключение)',
+  undercut:'undercut',
+  mean_revert:'mean_revert',
+  momentum:'momentum',
+  hybrid:'hybrid',
+};
+
+function formatStrategyName(value){
+  return strategyDisplayNames[value]||value||'—';
+}
+
+function updateStrategyHint(status){
+  const hintEl=e('strategyHint');
+  if(!hintEl) return;
+  const mode=(status?.mode==='manual')?'manual':'auto';
+  const manual=status?.manual;
+  if(mode==='manual' && manual){
+    hintEl.textContent=`Ручной режим: используется стратегия ${formatStrategyName(manual)}.`;
+  }else if(mode==='manual'){
+    hintEl.textContent='Ручной режим: стратегия не выбрана.';
+  }else{
+    hintEl.textContent='Авто: движок сам выбирает подходящую стратегию.';
+  }
+}
+
+async function loadStrategy(){
+  try{
+    const response=await jget('/api/strategy_status');
+    strategyStatus=response?.strategy||{};
+    const select=e('strategySel');
+    if(select){
+      const mode=strategyStatus.mode==='manual'?'manual':'auto';
+      const manual=strategyStatus.manual;
+      const value=(mode==='manual' && manual)?manual:'auto';
+      select.value=value;
+    }
+    updateStrategyHint(strategyStatus);
+    return strategyStatus;
+  }catch(err){
+    ap('[strategy] '+(err?.message||err));
+    updateStrategyHint(strategyStatus);
+    return null;
+  }
+}
+
 function setTradeStatusUI(trade){
   const container=e('tradeStatus');
   if(!container) return;
@@ -301,6 +348,14 @@ function setEngineStatusUI(status){
       const note=trade?.note||'';
       const segments=[stateLabel.toLowerCase(), contractLabel, note].filter(Boolean);
       if(segments.length) info.push('Сделка: '+segments.join(' '));
+    }
+  }
+  if(status?.strategy){
+    const strat=status.strategy;
+    if(strat.mode==='manual' && strat.manual){
+      info.push('Ручная стратегия: '+formatStrategyName(strat.manual));
+    }else if(strat.mode==='auto'){
+      info.push('Стратегии: авто');
     }
   }
   if(state==='idle' && !info.length){
@@ -535,6 +590,14 @@ setupAction('applyContracts',async()=>{
   await load();
   return response;
 },{logLabel:'contracts'});
+setupAction('strategySave',async()=>{
+  const select=e('strategySel');
+  const value=select?select.value:'auto';
+  const body=value==='auto'?{mode:'auto'}:{mode:'manual',strategy:value};
+  const response=await jpost('/api/strategy_set',body);
+  await loadStrategy();
+  return response;
+},{logLabel:'strategy'});
 setupAction('riskSave',async()=>{
   const profile=e('riskSel').value;
   const readable=riskProfileNames[profile]||profile;
@@ -550,6 +613,7 @@ async function boot(){
   ap(await jget('/api/ping'));
   ap(await jget('/api/test'));
   await load();
+  await loadStrategy();
   await wallet();
   await kpi();
   await leader();
@@ -559,8 +623,16 @@ async function boot(){
   startLogPolling();
   startUsagePolling();
 }
-async function refresh(){ await wallet(); await kpi(); await leader(); await riskStats() }
+async function refresh(){ await wallet(); await kpi(); await leader(); await riskStats(); await loadStrategy() }
 boot(); setInterval(refresh, REFRESH_INTERVAL)
 
 e('riskSel').onchange=()=>{ const v=e('riskSel').value; e('riskDesc').textContent=describeRisk(v)}
 setRiskProfileUI(e('riskSel').value);
+const strategySelEl=e('strategySel');
+if(strategySelEl){
+  strategySelEl.addEventListener('change',()=>{
+    const value=strategySelEl.value;
+    const preview=value==='auto'?{mode:'auto'}:{mode:'manual',manual:value};
+    updateStrategyHint(preview);
+  });
+}
