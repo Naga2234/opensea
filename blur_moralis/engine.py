@@ -5,7 +5,7 @@ from .config import settings, contracts, rpc_urls
 from .executor import Web3Helper, make_executor, PaperExecutor, LiveNotConfigured
 from .pricing import price_usd
 from .moralis_api import recent_trades
-from .stats import stats, risk
+from .stats import stats, risk, register_trade_event
 from web3 import Web3
 
 class Engine:
@@ -47,6 +47,7 @@ class Engine:
         self._stop_reason=None
         self._w3=None
         self._ex=None
+        register_trade_event("starting", note="Запуск движка, ждём сигналы", action="boot")
         try:
             if not self._connect():
                 self._stop_reason=self._stop_reason or "RPC connection failed"
@@ -71,6 +72,7 @@ class Engine:
             log(f"[ENGINE] stop signal ({reason})")
         else:
             log("[ENGINE] stop signal")
+        register_trade_event("idle", note=reason or "Движок остановлен", action="stop")
     def status(self):
         now=time.time()
         thread_alive=self._thread.is_alive() if self._thread else False
@@ -95,6 +97,17 @@ class Engine:
             "last_heartbeat": self._last_heartbeat,
             "heartbeat_ago": heartbeat_age,
             "stop_reason": self._stop_reason,
+            "last_trade": {
+                "status": risk.get("last_trade_status"),
+                "contract": risk.get("last_trade_contract"),
+                "strategy": risk.get("last_trade_strategy"),
+                "size_usd": risk.get("last_trade_size_usd"),
+                "pnl_usd": risk.get("last_trade_pnl_usd"),
+                "note": risk.get("last_trade_note"),
+                "action": risk.get("last_trade_action"),
+                "ts": risk.get("last_trade_ts"),
+                "closed": risk.get("last_trade_closed"),
+            },
         }
     def _connect(self):
         urls=[settings.RPC_URL]+(rpc_urls() or [])
@@ -106,6 +119,7 @@ class Engine:
                     self._w3=h.w3
                     log(f"[RPC] {u} chainId={self._w3.eth.chain_id} CHAIN={settings.CHAIN}")
                     self._ex=make_executor(self._w3, settings.ADDRESS, settings.PRIVATE_KEY)
+                    register_trade_event("waiting", contract="", note="RPC подключен, ожидаем сигналы", action="connect")
                     return True
             except LiveNotConfigured as e:
                 log(f"[LIVE][ERR] {e}")
@@ -152,58 +166,96 @@ class Engine:
             return
         log("[ENGINE] loop enter")
         self._last_heartbeat=time.time()
+        register_trade_event("waiting", note="Цикл запущен, ожидаем сигналы", action="loop")
         px=price_usd(settings.CHAIN) or 0.0
         while not self._stop:
             self._last_heartbeat=time.time()
             for c in contracts() or []:
+                if isinstance(c, str):
+                    short_c=(c[:8]+"…") if len(c)>8 else c
+                else:
+                    short_c=str(c) if c else "—"
+                register_trade_event("scanning", contract=c, note=f"Проверяем {short_c}", action="scan")
+                log(f"[ENGINE][SCAN] {short_c} — проверка сигнала")
                 if random.random()<0.1:
                     _ = recent_trades(c, limit=1)
-                if random.random()<0.05:
-                    strategy=random.choice(["undercut","mean_revert","momentum","hybrid"])
-                    edge=abs(random.gauss(0.008,0.006))
-                    fee=0.025
-                    gas_usd = 0.02 if settings.CHAIN=='polygon' else 1.0
-                    ev=edge - fee - (gas_usd / max(self._usd_balance(), 50.0))
-                    if ev<=0 or (edge*100.0)<(settings.USD_PROFIT_MIN or 0.01):
-                        log(f"[EV] skip {strategy} c={c[:8]} edge={edge:.4f} ev={ev:.4f}"); continue
-                    bal_usd=self._usd_balance()
-                    size_usd=min(bal_usd*float(settings.POSITION_FRACTION or 0.002), float(settings.POSITION_USD_CEIL or 3.0))
-                    if bal_usd<50: size_usd=min(size_usd,5.0)
-                    if bal_usd<20: size_usd=min(size_usd,3.0)
-                    size_eth=size_usd/(px or 1.0)
-                    trade={"contract":c,"token_id":"1","strategy":strategy,"edge":edge,"size_usd":size_usd}
-                    if settings.MODE in ("live","auto") and hasattr(self._ex,"buy_token"):
-                        try:
-                            h=self._ex.buy_token(trade["contract"], trade["token_id"]); log(f"[LIVE][OK] {h} {trade}")
-                            est_profit=max(0.0, size_usd*edge*0.5)
-                            if est_profit>0:
-                                risk["last_trade_profit_usd"]=est_profit
-                                risk["pnl_today_usd"]+=est_profit
-                                self._check_auto_stop(est_profit)
-                        except Exception as e:
-                            log(f"[LIVE][ERR] {e} {trade}")
+                trigger=random.random()
+                if trigger>=0.05:
+                    log(f"[ENGINE][WAIT] {short_c} — сигнала нет")
+                    register_trade_event("waiting", contract=c, note=f"Сигналов нет по {short_c}", action="wait")
+                    time.sleep(0.1)
+                    continue
+                strategy=random.choice(["undercut","mean_revert","momentum","hybrid"])
+                register_trade_event("signal", contract=c, strategy=strategy, note=f"Сигнал {strategy} обнаружен", action="signal")
+                edge=abs(random.gauss(0.008,0.006))
+                fee=0.025
+                gas_usd = 0.02 if settings.CHAIN=='polygon' else 1.0
+                ev=edge - fee - (gas_usd / max(self._usd_balance(), 50.0))
+                if ev<=0 or (edge*100.0)<(settings.USD_PROFIT_MIN or 0.01):
+                    log(f"[EV] skip {strategy} c={short_c} edge={edge:.4f} ev={ev:.4f}")
+                    register_trade_event("skipped", contract=c, strategy=strategy,
+                                          note=f"EV={ev:.4f} edge={edge:.4f}", action="skip")
+                    time.sleep(0.1)
+                    continue
+                bal_usd=self._usd_balance()
+                size_usd=min(bal_usd*float(settings.POSITION_FRACTION or 0.002), float(settings.POSITION_USD_CEIL or 3.0))
+                if bal_usd<50: size_usd=min(size_usd,5.0)
+                if bal_usd<20: size_usd=min(size_usd,3.0)
+                size_eth=size_usd/(px or 1.0)
+                trade={"contract":c,"token_id":"1","strategy":strategy,"edge":edge,"size_usd":size_usd}
+                register_trade_event("entering", contract=c, strategy=strategy, size_usd=size_usd,
+                                      note=f"Готовим вход {strategy} на {short_c}", action="enter")
+                if settings.MODE in ("live","auto") and hasattr(self._ex,"buy_token"):
+                    try:
+                        h=self._ex.buy_token(trade["contract"], trade["token_id"])
+                        log(f"[LIVE][OK] {h} {trade}")
+                        register_trade_event("filled", contract=c, strategy=strategy, size_usd=size_usd,
+                                              note=f"TX {h}", action="buy")
+                        est_profit=max(0.0, size_usd*edge*0.5)
+                        if est_profit>0:
+                            risk["last_trade_profit_usd"]=est_profit
+                            risk["pnl_today_usd"]+=est_profit
+                            self._check_auto_stop(est_profit)
+                            register_trade_event("win", contract=c, strategy=strategy, size_usd=size_usd,
+                                                  pnl_usd=est_profit,
+                                                  note=f"Оценка профита ${est_profit:.2f}", action="result")
+                    except Exception as e:
+                        log(f"[LIVE][ERR] {e} {trade}")
+                        register_trade_event("error", contract=c, strategy=strategy, size_usd=size_usd,
+                                              note=str(e), action="error")
+                else:
+                    PaperExecutor().buy(trade, size_eth)
+                    chain_label = (settings.CHAIN or "CHAIN").upper()
+                    log(f"[TRADE][PAPER][BUY] {strategy} {short_c} size=${size_usd:.2f} (~{size_eth:.4f} {chain_label} unit)")
+                    risk["spend_today_usd"]+=size_usd
+                    ok = random.random() < (0.52 + min(0.05, edge*10))
+                    if ok:
+                        stats["by_strategy"][strategy]["wins"]+=1
+                        profit=max(0.01, size_usd*edge*0.5)
+                        risk["pnl_today_usd"]+=profit
+                        risk["last_trade_profit_usd"]=profit
+                        risk["loss_streak"]=0
+                        self._check_auto_stop(profit)
+                        register_trade_event("win", contract=c, strategy=strategy, size_usd=size_usd,
+                                              pnl_usd=profit,
+                                              note=f"Профит ${profit:.2f}", action="sell")
+                        log(f"[TRADE][RESULT][WIN] {strategy} {short_c} +${profit:.2f}")
                     else:
-                        PaperExecutor().buy(trade, size_eth)
-                        risk["spend_today_usd"]+=size_usd
-                        ok = random.random() < (0.52 + min(0.05, edge*10))
-                        if ok:
-                            stats["by_strategy"][strategy]["wins"]+=1
-                            profit=max(0.01, size_usd*edge*0.5)
-                            risk["pnl_today_usd"]+=profit
-                            risk["last_trade_profit_usd"]=profit
-                            risk["loss_streak"]=0
-                            self._check_auto_stop(profit)
-                        else:
-                            stats["by_strategy"][strategy]["losses"]+=1
-                            loss=min(0.5, size_usd*0.5)
-                            risk["pnl_today_usd"]-=loss
-                            risk["last_trade_profit_usd"]=-loss
-                            risk["loss_streak"]=risk.get("loss_streak",0)+1
-                            self._check_auto_stop()
-                    if self._stop: break
-                    time.sleep(0.2)
+                        stats["by_strategy"][strategy]["losses"]+=1
+                        loss=min(0.5, size_usd*0.5)
+                        risk["pnl_today_usd"]-=loss
+                        risk["last_trade_profit_usd"]=-loss
+                        register_trade_event("loss", contract=c, strategy=strategy, size_usd=size_usd,
+                                              pnl_usd=-loss,
+                                              note=f"Убыток ${loss:.2f}", action="sell")
+                        log(f"[TRADE][RESULT][LOSS] {strategy} {short_c} -${loss:.2f}")
+                        risk["loss_streak"]=risk.get("loss_streak",0)+1
+                        self._check_auto_stop()
                 if self._stop: break
+                time.sleep(0.2)
+            if self._stop: break
             time.sleep(1.0)
         self._last_heartbeat=time.time()
         self._stopped_at=self._last_heartbeat
         log(f"[ENGINE] loop exit ({self._stop_reason or 'stopped'})")
+        register_trade_event("idle", note=self._stop_reason or "Движок остановлен", action="stop")

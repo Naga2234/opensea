@@ -6,7 +6,7 @@ from ..config import settings, contracts, rpc_urls
 from ..pricing import price_usd
 from ..executor import Web3Helper, LiveNotConfigured
 from ..engine import Engine
-from ..moralis_api import native_balance, ping as moralis_ping
+from ..moralis_api import native_balance, ping as moralis_ping, current_cu_usage
 import os, json, time
 
 app = FastAPI()
@@ -142,6 +142,15 @@ def api_leader():
 
 @app.get("/api/logs")
 def api_logs(since:int=0): return {"ok":True, "logs": get_logs(since)}
+
+@app.get("/api/moralis_usage")
+def api_moralis_usage(force: bool = False):
+    try:
+        usage = current_cu_usage(force=force)
+    except Exception as e:
+        log(f"[MORALIS][ERR] usage endpoint: {e}")
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    return {"ok": usage is not None, "usage": usage}
 
 @app.get("/api/settings")
 def api_settings(): 

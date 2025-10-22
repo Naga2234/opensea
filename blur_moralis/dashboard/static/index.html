@@ -48,6 +48,16 @@
       </div>
       <div class="engine-status__meta muted" id="engineStatusMeta">Нет данных</div>
     </div>
+    <div class="engine-trade" id="tradeStatus" aria-live="polite">
+      <div class="engine-trade__header">
+        <span class="engine-trade__label">Сделка</span>
+        <span class="engine-trade__badge" id="tradeStatusBadge">—</span>
+      </div>
+      <div class="engine-trade__bar">
+        <div class="engine-trade__progress" id="tradeStatusProgress"></div>
+      </div>
+      <div class="engine-trade__meta muted" id="tradeStatusMeta">Ожидаем сигнал</div>
+    </div>
   </div>
 
   <div class="card">
@@ -107,6 +117,20 @@
       </select>
       <button class="btn" id="balSrcSave">Сохранить</button>
       <span class="muted">auto: сначала RPC, если пусто — Moralis (экономит CU)</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Moralis CU Usage</h3>
+    <div class="usage-meter">
+      <div class="usage-meter__labels">
+        <span id="cuUsageLabel">—</span>
+        <span id="cuUsageRemaining" class="usage-meter__remaining">—</span>
+      </div>
+      <div class="usage-meter__bar">
+        <div class="usage-meter__progress" id="cuUsageProgress"></div>
+      </div>
+      <div class="muted usage-meter__meta" id="cuUsageMeta">Нет данных</div>
     </div>
   </div>
 
