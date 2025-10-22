@@ -160,7 +160,7 @@ def api_preset_lowcap_polygon():
         "GAS_MAX_FEE_GWEI":"80",
         "GAS_PRIORITY_GWEI":"2.0",
         "RISK_PROFILE":"balanced",
-        "CONTRACTS": '["0x67F4732266C7300cca593c814d46bee72e40659F","0x2b4a66557a79263275826ad31a4cddc2789334bd","0x86935F11C86623deC8a25696E1C19a8659CbF95d"]'
+        "CONTRACTS": '["0x86935F11C86623deC8a25696E1C19a8659CbF95d","0x67F4732266C7300cca593C814d46bee72e40659F","0xE28D2D8746D855251BA677a91626009CB33aA4F9","0x670fd103b1a08628e9557cD66B87DeD841115190"]'
     }
     for k,v in pairs.items(): setattr(settings, k, v)
     _save_env(pairs); log("[PRESET] Low‑Cap Polygon applied"); return {"ok":True, "applied":pairs}

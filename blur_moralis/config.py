@@ -36,11 +36,11 @@ class Settings(BaseSettings):
     GAS_MAX_FEE_GWEI: float = 80.0
     GAS_PRIORITY_GWEI: float = 2.0
     CONTRACTS: str = (
-        "[\"0x67F4732266C7300cca593c814d46bee72e40659F\","
-        "\"0x2b4a66557a79263275826ad31a4cddc2789334bd\","  # noqa: E501
-        "\"0x86935F11C86623deC8a25696E1C19a8659CbF95d\"]"
+        "[\"0x86935F11C86623deC8a25696E1C19a8659CbF95d\","
+        "\"0x67F4732266C7300cca593C814d46bee72e40659F\","
+        "\"0xE28D2D8746D855251BA677a91626009CB33aA4F9\","
+        "\"0x670fd103b1a08628e9557cD66B87DeD841115190\"]"
     )
-    BALANCE_SOURCE: str = "auto"  # auto | rpc | moralis
     MORALIS_RATE_LIMIT_SEC: int = 45
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", case_sensitive=False)
