@@ -1,4 +1,11 @@
-risk={"pnl_today_usd":0.0,"spend_today_usd":0.0,"loss_streak":0}
+risk={
+    "pnl_today_usd":0.0,
+    "spend_today_usd":0.0,
+    "loss_streak":0,
+    "last_trade_profit_usd":0.0,
+    "auto_stop_triggered":False,
+    "auto_stop_reason":"",
+}
 stats={"by_strategy":{
     "undercut":{"wins":0,"losses":0,"avg_edge":0.0},
     "mean_revert":{"wins":0,"losses":0,"avg_edge":0.0},
@@ -39,4 +46,16 @@ def leaderboard(min_trades:int=3):
     else:
         most=max(table.items(), key=lambda kv: kv[1]["n"])[0] if table else None
         nl=(f"Пока мало данных. Больше всего данных по «{most}»: {table[most]['n']} сделок, винрейт {table[most]['winrate']:.1f}%." if most else "Статистика появится после первых сделок.")
-    return {"by_strategy":table, "best":best, "nl":nl, "_risk":{"pnl_today_usd":round(risk['pnl_today_usd'],2),"spend_today_usd":round(risk['spend_today_usd'],2),"loss_streak":risk['loss_streak']}}
+    return {
+        "by_strategy":table,
+        "best":best,
+        "nl":nl,
+        "_risk":{
+            "pnl_today_usd":round(risk['pnl_today_usd'],2),
+            "spend_today_usd":round(risk['spend_today_usd'],2),
+            "loss_streak":risk['loss_streak'],
+            "last_trade_profit_usd":round(risk.get('last_trade_profit_usd',0.0),2),
+            "auto_stop_triggered":bool(risk.get('auto_stop_triggered')),
+            "auto_stop_reason":risk.get('auto_stop_reason',''),
+        },
+    }
