@@ -18,30 +18,30 @@ class Settings(BaseSettings):
     ADDRESS: str = "0xa57a5e84da99893364bea1fbb59dd6f437216d12"
     CHAIN: str = "polygon"   # eth | polygon
     MODE: str = "paper"  # paper | live | auto
-    RISK_PROFILE: str = "lowcap_polygon"
+    RISK_PROFILE: str = "balanced"
     RPC_URL: str = "https://polygon-rpc.com"
     RPC_URLS: str = (
         "[\"https://polygon-rpc.com\",\"https://rpc.ankr.com/polygon\","  # noqa: E501
         "\"https://site1.moralis-nodes.com/eth/231746d238334c139d70af0f910d5563\","  # noqa: E501
         "\"https://site2.moralis-nodes.com/eth/231746d238334c139d70af0f910d5563\"]"
     )
-    POSITION_FRACTION: float = 0.002
-    POSITION_USD_CEIL: float = 3.0
-    MAX_SPEND_USD_PER_DAY: float = 6.0
-    MAX_OPEN_POSITIONS: int = 1
-    USD_PROFIT_MIN: float = 0.01
+    POSITION_FRACTION: float = 0.005
+    POSITION_USD_CEIL: float = 9.0
+    MAX_SPEND_USD_PER_DAY: float = 8.0
+    MAX_OPEN_POSITIONS: int = 2
+    USD_PROFIT_MIN: float = 0.02
     AUTO_STOP_PROFIT_USD: float = 0.15
     STRATEGY_MODE: str = "auto"  # auto | manual
     MANUAL_STRATEGY: str = "undercut"
-    GAS_MAX_FEE_GWEI: float = 60.0
-    GAS_PRIORITY_GWEI: float = 1.5
+    GAS_MAX_FEE_GWEI: float = 80.0
+    GAS_PRIORITY_GWEI: float = 2.0
     CONTRACTS: str = (
         "[\"0x67F4732266C7300cca593c814d46bee72e40659F\","
         "\"0x2b4a66557a79263275826ad31a4cddc2789334bd\","  # noqa: E501
         "\"0x86935F11C86623deC8a25696E1C19a8659CbF95d\"]"
     )
     BALANCE_SOURCE: str = "auto"  # auto | rpc | moralis
-    MORALIS_RATE_LIMIT_SEC: int = 60
+    MORALIS_RATE_LIMIT_SEC: int = 45
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", case_sensitive=False)
 
