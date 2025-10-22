@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     MAX_SPEND_USD_PER_DAY: float = 6.0
     MAX_OPEN_POSITIONS: int = 1
     USD_PROFIT_MIN: float = 0.01
+    AUTO_STOP_PROFIT_USD: float = 0.15
     GAS_MAX_FEE_GWEI: float = 60.0
     GAS_PRIORITY_GWEI: float = 1.5
     CONTRACTS: str = (
