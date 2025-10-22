@@ -22,9 +22,26 @@ class PaperExecutor:
         return tx
 
 def make_executor(w3: Web3, address: str, private_key: str):
-    if settings.MODE in ("live","auto") and settings.OPENSEA_API_KEY and private_key:
-        try:
-            return OpenSeaExecutor(w3, address, private_key)
-        except Exception as e:
-            log(f"[LIVE] disabled: {e}")
-    return PaperExecutor()
+    live_mode = settings.MODE in ("live", "auto")
+    if not live_mode:
+        return PaperExecutor()
+
+    missing = []
+    if not settings.OPENSEA_API_KEY:
+        missing.append("OPENSEA_API_KEY")
+    if not private_key:
+        missing.append("PRIVATE_KEY")
+    addr = address or ""
+    if not addr and not private_key:
+        missing.append("ADDRESS")
+    if missing:
+        raise LiveNotConfigured(
+            "Live mode requires configured " + ", ".join(missing)
+        )
+
+    try:
+        return OpenSeaExecutor(w3, address, private_key)
+    except LiveNotConfigured:
+        raise
+    except Exception as e:
+        raise LiveNotConfigured(f"Failed to initialise live executor: {e}")

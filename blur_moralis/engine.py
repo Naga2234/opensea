@@ -2,7 +2,7 @@ import threading, time, random
 from typing import Optional
 from .runtime import log
 from .config import settings, contracts, rpc_urls
-from .executor import Web3Helper, make_executor, PaperExecutor
+from .executor import Web3Helper, make_executor, PaperExecutor, LiveNotConfigured
 from .pricing import price_usd
 from .moralis_api import recent_trades
 from .stats import stats, risk
@@ -24,15 +24,46 @@ class Engine:
         self._started_at=None
         self._stopped_at=None
         self._last_heartbeat=None
+    def _validate_live_ready(self):
+        if settings.MODE not in ("live", "auto"):
+            return
+        missing=[]
+        if not settings.OPENSEA_API_KEY:
+            missing.append("OPENSEA_API_KEY")
+        if not settings.PRIVATE_KEY:
+            missing.append("PRIVATE_KEY")
+        if not settings.ADDRESS and not settings.PRIVATE_KEY:
+            missing.append("ADDRESS")
+        if missing:
+            raise LiveNotConfigured(
+                "Live mode requires configured " + ", ".join(missing)
+            )
+
     def start(self):
-        if self._thread and self._thread.is_alive(): return
-        self._stop=False
+        if self._thread and self._thread.is_alive():
+            return
+        self._validate_live_ready()
+        self._stop=True
         self._stop_reason=None
+        self._w3=None
+        self._ex=None
+        try:
+            if not self._connect():
+                self._stop_reason=self._stop_reason or "RPC connection failed"
+                raise RuntimeError(self._stop_reason)
+        except LiveNotConfigured as e:
+            self._stop_reason=str(e)
+            raise
+        self._stop=False
         self._started_at=time.time()
         self._stopped_at=None
         self._last_heartbeat=None
-        risk["auto_stop_triggered"]=False; risk["auto_stop_reason"]=""; risk["last_trade_profit_usd"]=0.0
-        self._thread=threading.Thread(target=self.run,daemon=True); self._thread.start(); log("[ENGINE] started")
+        risk["auto_stop_triggered"]=False
+        risk["auto_stop_reason"]=""
+        risk["last_trade_profit_usd"]=0.0
+        self._thread=threading.Thread(target=self.run,daemon=True)
+        self._thread.start()
+        log("[ENGINE] started")
     def stop(self, reason: Optional[str]=None):
         self._stop=True
         if reason:
@@ -67,11 +98,26 @@ class Engine:
         }
     def _connect(self):
         urls=[settings.RPC_URL]+(rpc_urls() or [])
+        last_error=None
         for u in [x for x in urls if x]:
             try:
                 h=Web3Helper(u)
-                if h.is_ok(): self._w3=h.w3; log(f"[RPC] {u} chainId={self._w3.eth.chain_id} CHAIN={settings.CHAIN}"); self._ex=make_executor(self._w3, settings.ADDRESS, settings.PRIVATE_KEY); return True
-            except Exception as e: log(f"[RPC] fail {u} {e}")
+                if h.is_ok():
+                    self._w3=h.w3
+                    log(f"[RPC] {u} chainId={self._w3.eth.chain_id} CHAIN={settings.CHAIN}")
+                    self._ex=make_executor(self._w3, settings.ADDRESS, settings.PRIVATE_KEY)
+                    return True
+            except LiveNotConfigured as e:
+                log(f"[LIVE][ERR] {e}")
+                self._stop_reason=str(e)
+                raise
+            except Exception as e:
+                last_error=e
+                log(f"[RPC] fail {u} {e}")
+        if last_error:
+            self._stop_reason=f"RPC connect failed: {last_error}"
+        elif not urls or not any(urls):
+            self._stop_reason="RPC connect failed: no RPC URLs configured"
         return False
     def _usd_balance(self)->float:
         if not self._w3 or not settings.ADDRESS: return 0.0
@@ -93,7 +139,17 @@ class Engine:
             self.stop(reason)
 
     def run(self):
-        if not self._connect(): log("[ENGINE] no RPC, sleeping"); time.sleep(3); return
+        try:
+            if not self._w3 or not self._ex:
+                if not self._connect():
+                    log("[ENGINE] no RPC, stopping")
+                    self._stop=True
+                    return
+        except LiveNotConfigured as e:
+            log(f"[ENGINE] start aborted: {e}")
+            self._stop=True
+            self._stop_reason=str(e)
+            return
         log("[ENGINE] loop enter")
         self._last_heartbeat=time.time()
         px=price_usd(settings.CHAIN) or 0.0

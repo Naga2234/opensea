@@ -4,7 +4,7 @@ from fastapi.staticfiles import StaticFiles
 from ..runtime import log, get_logs
 from ..config import settings, contracts, rpc_urls
 from ..pricing import price_usd
-from ..executor import Web3Helper
+from ..executor import Web3Helper, LiveNotConfigured
 from ..engine import Engine
 from ..moralis_api import native_balance, ping as moralis_ping
 import os, json, time
@@ -153,7 +153,15 @@ def api_status():
 
 @app.post("/api/start")
 def api_start():
-    engine=Engine(); engine.start(); return {"ok":True, "status": engine.status()}
+    engine=Engine()
+    try:
+        engine.start()
+    except LiveNotConfigured as e:
+        return JSONResponse({"ok":False, "error":str(e)}, status_code=400)
+    except Exception as e:
+        log(f"[ENGINE][ERR] start: {e}")
+        return JSONResponse({"ok":False, "error":str(e)}, status_code=400)
+    return {"ok":True, "status": engine.status()}
 
 @app.post("/api/stop")
 def api_stop():
