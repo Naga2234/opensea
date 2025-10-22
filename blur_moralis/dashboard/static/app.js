@@ -11,6 +11,20 @@ let logCursor=0;
 let lastUsageHash=null;
 let lastUsageLogTs=0;
 let strategyStatus=null;
+let currentChain=null;
+
+const CHAIN_SYMBOLS={
+  eth:'ETH',
+  ethereum:'ETH',
+  polygon:'MATIC',
+  matic:'MATIC'
+};
+
+function chainSymbol(chain){
+  if(!chain) return '';
+  const key=String(chain).toLowerCase();
+  return CHAIN_SYMBOLS[key]||String(chain).toUpperCase();
+}
 
 function setLoading(button, loading){
   if(!button) return;
@@ -240,10 +254,18 @@ function setTradeStatusUI(trade){
     const parts=[];
     if(trade?.strategy) parts.push('Стратегия '+trade.strategy);
     if(typeof trade?.contract==='string' && trade.contract) parts.push('Контракт '+trade.contract.slice(0,8)+'…');
-    if(Number.isFinite(Number(trade?.size_usd))) parts.push('Объём $'+Number(trade.size_usd).toFixed(2));
-    if(Number.isFinite(Number(trade?.pnl_usd)) && Number(trade.pnl_usd)!==0){
-      const sign=Number(trade.pnl_usd)>0?'+':'';
-      parts.push('PnL $'+sign+Number(trade.pnl_usd).toFixed(2));
+    const symbol=trade?.symbol||chainSymbol(trade?.chain||currentChain);
+    const sizeNativeRaw=Number(trade?.size_native);
+    if(Number.isFinite(sizeNativeRaw) && sizeNativeRaw>0){
+      const sizeNative=sizeNativeRaw>=0.01?sizeNativeRaw.toFixed(2):sizeNativeRaw.toFixed(4);
+      parts.push('Объём ≈'+sizeNative+(symbol?' '+symbol:''));
+    }
+    const pnlNativeRaw=Number(trade?.pnl_native);
+    if(Number.isFinite(pnlNativeRaw) && pnlNativeRaw!==0){
+      const sign=pnlNativeRaw>0?'+':'';
+      const magnitude=Math.abs(pnlNativeRaw);
+      const formatted=magnitude>=0.01?magnitude.toFixed(2):magnitude.toFixed(4);
+      parts.push('PnL '+sign+formatted+(symbol?' '+symbol:''));
     }
     if(trade?.note) parts.push(trade.note);
     if(trade?.ts){
@@ -449,6 +471,7 @@ function setRiskProfileUI(value){
 }
 
 async function load(){ const s=await jget('/api/settings'); const S=s.settings||{};
+  currentChain=S.CHAIN||null;
   e('addr').textContent=S.ADDRESS||'—'; e('chain').textContent=S.CHAIN||'—';
   e('mode').textContent=S.MODE||'—'; e('riskCur').textContent=S.RISK_PROFILE||'—'; e('live').textContent=(S.OPENSEA_API_KEY?'ready':'not ready');
   e('chainSel').value=S.CHAIN||'eth'; try{ e('contracts').value=JSON.stringify(JSON.parse(S.CONTRACTS||'[]'),null,2)}catch{ e('contracts').value=S.CONTRACTS||'[]' }
@@ -458,8 +481,18 @@ async function load(){ const s=await jget('/api/settings'); const S=s.settings||
 }
 
 async function wallet(){ const w=await jget('/api/wallet');
-  e('bal').textContent=(w.eth||0).toFixed(6); e('usd').textContent=(w.usd==null?'—':w.usd.toFixed(2));
-  if(w.source){ e('balSrcBadge').textContent='src: '+w.source; } }
+  const amountRaw=Number(w.balance ?? w.eth ?? 0);
+  const amount=Number.isFinite(amountRaw)?amountRaw:0;
+  const symbol=w.symbol||chainSymbol(w.chain||currentChain);
+  e('bal').textContent=Number.isFinite(amountRaw)?amount.toFixed(6):'—';
+  const symbolEl=e('balSymbol');
+  if(symbolEl){ symbolEl.textContent=symbol||''; symbolEl.style.display=symbol?'inline-block':'none'; }
+  const srcEl=e('balSrcBadge');
+  if(srcEl){
+    if(w.source){ srcEl.textContent='src: '+w.source; srcEl.style.display='inline-block'; }
+    else{ srcEl.textContent=''; srcEl.style.display='none'; }
+  }
+}
 
 async function kpi(){ const j=await jget('/api/kpi'); const m=j.kpi||{};
   function upd(key, barId, wrId){ const v=m[key]||{winrate:0}; e(wrId).textContent=(v.winrate||0)+'%'; e(barId).style.width=(v.winrate||0)+'%'}
@@ -485,8 +518,8 @@ function renderRiskStatsRow(profile,data,best){
     riskProfileNames[profile]||profile,
     fmt(data?.trades),
     data?.winrate!=null?(data.winrate.toFixed?Number(data.winrate).toFixed(1):data.winrate)+'%':'—',
-    data?.avgProfit!=null?'$'+Number(data.avgProfit).toFixed(2):'—',
-    data?.totalProfit!=null?'$'+Number(data.totalProfit).toFixed(2):'—'
+    data?.avgProfit!=null?Number(data.avgProfit).toFixed(2):'—',
+    data?.totalProfit!=null?Number(data.totalProfit).toFixed(2):'—'
   ];
   cells.forEach((text,index)=>{
     const td=document.createElement('td');

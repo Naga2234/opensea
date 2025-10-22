@@ -9,8 +9,8 @@ from ..config import (
     available_strategies,
     normalize_strategy,
     strategy_state,
+    native_symbol,
 )
-from ..pricing import price_usd
 from ..executor import Web3Helper, LiveNotConfigured
 from ..engine import Engine
 from ..moralis_api import native_balance, ping as moralis_ping, current_cu_usage
@@ -78,9 +78,17 @@ def api_wallet():
         bwei_m = native_balance(settings.ADDRESS) or 0
         eth = bwei_m/1e18 if bwei_m else 0.0
         src="moralis"
-    px = price_usd(settings.CHAIN) or 0.0
-    usd = eth*px if px else None
-    return {"ts": time.time(), "eth": eth, "usd": usd, "address": settings.ADDRESS, "rpc": used, "source": src}
+    symbol = native_symbol(settings.CHAIN)
+    return {
+        "ts": time.time(),
+        "eth": eth,
+        "balance": eth,
+        "symbol": symbol,
+        "chain": settings.CHAIN,
+        "address": settings.ADDRESS,
+        "rpc": used,
+        "source": src,
+    }
 
 @app.post("/api/balance_source_set")
 def api_balance_source_set(body: dict = Body(...)):

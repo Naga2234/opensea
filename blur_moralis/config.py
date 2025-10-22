@@ -88,3 +88,14 @@ def strategy_state():
         "available": available_strategies(),
         "current": current,
     }
+
+
+def native_symbol(chain: Optional[str]) -> str:
+    if not chain:
+        return "NATIVE"
+    chain_key = str(chain).strip().lower()
+    if chain_key in ("eth", "ethereum"):
+        return "ETH"
+    if chain_key in ("polygon", "matic"):
+        return "MATIC"
+    return str(chain).strip().upper() or "NATIVE"
