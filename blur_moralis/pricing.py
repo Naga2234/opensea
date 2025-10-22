@@ -3,15 +3,16 @@ from http import HTTPStatus
 from .runtime import log
 
 _cache={}; _ts=0.0; _cooldown_until=0.0
+_fallback_prices={"eth": 1800.0, "polygon": 0.65}
 
 def _cached_value(key:str)->float:
     value=_cache.get(key)
     if value is None:
-        return 0.0
+        return float(_fallback_prices.get(key, 0.0))
     try:
         return float(value)
     except (TypeError, ValueError):
-        return 0.0
+        return float(_fallback_prices.get(key, 0.0))
 
 def price_usd(chain:str)->float:
     global _cache,_ts,_cooldown_until
@@ -31,8 +32,14 @@ def price_usd(chain:str)->float:
         )
         r.raise_for_status()
         data=r.json(); _ts=now
-        _cache['eth']=float(data.get('ethereum',{}).get('usd') or 0.0)
-        _cache['polygon']=float(data.get('polygon',{}).get('usd') or 0.0)
+        eth_px=float(data.get('ethereum',{}).get('usd') or 0.0)
+        matic_px=float(data.get('polygon',{}).get('usd') or 0.0)
+        if eth_px>0:
+            _cache['eth']=eth_px
+        if matic_px>0:
+            _cache['polygon']=matic_px
+        _fallback_prices['eth']=eth_px or _fallback_prices['eth']
+        _fallback_prices['polygon']=matic_px or _fallback_prices['polygon']
         return _cached_value(key)
     except httpx.HTTPStatusError as e:
         status=e.response.status_code
