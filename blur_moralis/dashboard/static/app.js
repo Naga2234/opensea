@@ -57,12 +57,29 @@ function ap(raw){
 async function jget(u){const r=await fetch(u); return await r.json()}
 async function jpost(u,b){const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b||{})}); return await r.json()}
 
+function describeRisk(profile){
+  const D={
+    conservative:'Минимальные риски: меньший размер позиции, более высокий минимум профита, ниже лимит газа, реже запросы Moralis.',
+    balanced:'Сбалансировано: стандартные лимиты, средний размер позиции.',
+    aggressive:'Выше риск: крупнее позиции, ниже целевой профит на сделку, выше лимит газа, быстрее реакции.'
+  };
+  return D[profile]||'';
+}
+
+function setRiskProfileUI(value){
+  if(!value) return;
+  const control=e('riskSel');
+  control.value=value;
+  e('riskDesc').textContent=describeRisk(value);
+}
+
 async function load(){ const s=await jget('/api/settings'); const S=s.settings||{};
   e('addr').textContent=S.ADDRESS||'—'; e('chain').textContent=S.CHAIN||'—';
   e('mode').textContent=S.MODE||'—'; e('riskCur').textContent=S.RISK_PROFILE||'—'; e('live').textContent=(S.OPENSEA_API_KEY?'ready':'not ready');
   e('chainSel').value=S.CHAIN||'eth'; try{ e('contracts').value=JSON.stringify(JSON.parse(S.CONTRACTS||'[]'),null,2)}catch{ e('contracts').value=S.CONTRACTS||'[]' }
   e('osKey').value=S.OPENSEA_API_KEY||''; e('modeSel').value=S.MODE||'paper';
   e('balSrc').value=S.BALANCE_SOURCE||'auto';
+  if(S.RISK_PROFILE) setRiskProfileUI(S.RISK_PROFILE);
 }
 
 async function wallet(){ const w=await jget('/api/wallet');
@@ -77,6 +94,67 @@ async function leader(){ const j=await jget('/api/leader'); const L=j.leader||{}
   e('nl').textContent=L.nl||e('nl').textContent; e('best').textContent=L.best||'—'
 }
 
+const riskProfileNames={
+  conservative:'Консервативный',
+  balanced:'Сбалансированный',
+  aggressive:'Агрессивный'
+};
+
+function renderRiskStatsRow(profile,data,best){
+  const tr=document.createElement('tr');
+  tr.dataset.profile=profile;
+  if(profile===best) tr.classList.add('risk-best');
+  const fmt=(value,def='—')=>value==null?def:value;
+  const cells=[
+    riskProfileNames[profile]||profile,
+    fmt(data?.trades),
+    data?.winrate!=null?(data.winrate.toFixed?Number(data.winrate).toFixed(1):data.winrate)+'%':'—',
+    data?.avgProfit!=null?'$'+Number(data.avgProfit).toFixed(2):'—',
+    data?.totalProfit!=null?'$'+Number(data.totalProfit).toFixed(2):'—'
+  ];
+  cells.forEach(text=>{
+    const td=document.createElement('td');
+    td.textContent=text;
+    tr.appendChild(td);
+  });
+  return tr;
+}
+
+function inferBestProfile(stats){
+  let best=null; let bestProfit=-Infinity;
+  Object.entries(stats||{}).forEach(([profile,data])=>{
+    const profit=Number(data?.totalProfit);
+    if(!Number.isFinite(profit)) return;
+    if(profit>bestProfit){
+      bestProfit=profit;
+      best=profile;
+    }
+  });
+  return best;
+}
+
+async function riskStats(){
+  const container=e('riskStatsBody');
+  if(!container) return;
+  try{
+    const response=await jget('/api/risk_stats');
+    const stats=response.stats||{};
+    const best=response.best||inferBestProfile(stats)||null;
+    container.innerHTML='';
+    const profiles=['conservative','balanced','aggressive'];
+    profiles.forEach(profile=>{
+      const row=renderRiskStatsRow(profile,stats[profile],best);
+      container.appendChild(row);
+    });
+    const highlight=e('riskStatsHighlight');
+    if(highlight){
+      highlight.textContent=best?(riskProfileNames[best]||best):'—';
+    }
+  }catch(err){
+    ap('[risk_stats] '+(err?.message||err));
+  }
+}
+
 e('rpc').onclick=async()=>{ap('[UI] rpc'); ap(await jpost('/api/rpc_check',{}))}
 e('test').onclick=async()=>{ap('[UI] test'); ap(await jget('/api/test'))}
 e('modeSave').onclick=async()=>{ap('[UI] mode'); ap(await jpost('/api/mode_set',{MODE:e('modeSel').value}))}
@@ -87,8 +165,8 @@ e('chainSave').onclick=async()=>{ap('[UI] chain'); ap(await jpost('/api/chain_se
 e('applyContracts').onclick=async()=>{ap('[UI] patch'); ap(await jpost('/api/patch',{CONTRACTS:JSON.parse(e('contracts').value||'[]')}))}
 e('balSrcSave').onclick=async()=>{ap('[UI] balSrc'); ap(await jpost('/api/balance_source_set',{source:e('balSrc').value}))}
 
-async function boot(){ ap('[UI] boot'); ap(await jget('/api/js-ok')); ap(await jget('/api/ping')); ap(await jget('/api/test')); await load(); await wallet(); await kpi(); await leader() }
-boot(); setInterval(async()=>{await wallet(); await kpi(); await leader()}, 4000)
+async function boot(){ ap('[UI] boot'); ap(await jget('/api/js-ok')); ap(await jget('/api/ping')); ap(await jget('/api/test')); await load(); await wallet(); await kpi(); await leader(); await riskStats() }
+boot(); setInterval(async()=>{await wallet(); await kpi(); await leader(); await riskStats()}, 4000)
 
 e('riskSave').onclick=async()=>{
   const v=e('riskSel').value;
@@ -96,12 +174,5 @@ e('riskSave').onclick=async()=>{
   ap(await jpost('/api/risk_mode_set',{profile:v}));
   await load();
 }
-e('riskSel').onchange=()=>{
-  const v=e('riskSel').value;
-  const D={
-    conservative:'Минимальные риски: меньший размер позиции, более высокий минимум профита, ниже лимит газа, редче запросы Moralis.',
-    balanced:'Сбалансировано: стандартные лимиты, средний размер позиции.',
-    aggressive:'Выше риск: крупнее позиции, ниже целевой профит на сделку, выше лимит газа, быстрее реакции.'
-  };
-  e('riskDesc').textContent=D[v]||'';
-}
+e('riskSel').onchange=()=>{ const v=e('riskSel').value; e('riskDesc').textContent=describeRisk(v)}
+setRiskProfileUI(e('riskSel').value);

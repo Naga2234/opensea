@@ -50,6 +50,26 @@
       <button class="btn" id="riskSave">Применить</button>
     </div>
     <div id="riskDesc" class="muted" style="margin-top:6px">Сбалансировано: стандартные лимиты, средний размер позиции.</div>
+    <div class="mini-pill" style="margin-top:12px">Текущий лидер по прибыли: <b id="riskStatsHighlight">—</b></div>
+  </div>
+
+  <div class="card">
+    <h3>Статистика профилей риска</h3>
+    <div class="muted" style="margin-bottom:12px">Данные обновляются в реальном времени каждые 4 секунды.</div>
+    <div class="risk-table-wrap">
+      <table class="risk-table">
+        <thead>
+          <tr>
+            <th>Профиль</th>
+            <th>Сделок</th>
+            <th>Win‑rate</th>
+            <th>Avg PnL</th>
+            <th>Общая прибыль</th>
+          </tr>
+        </thead>
+        <tbody id="riskStatsBody"></tbody>
+      </table>
+    </div>
   </div>
 
   <div class="card">
