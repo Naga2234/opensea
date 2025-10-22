@@ -1,4 +1,36 @@
 const e=id=>document.getElementById(id);
+const REFRESH_INTERVAL=4000;
+const MAX_LOG_ENTRIES=400;
+
+function setLoading(button, loading){
+  if(!button) return;
+  button.disabled=!!loading;
+  if(loading){
+    button.dataset.loading='true';
+    button.setAttribute('aria-busy','true');
+  }else{
+    delete button.dataset.loading;
+    button.removeAttribute('aria-busy');
+  }
+}
+
+function setupAction(buttonId, action, {logLabel}={}){
+  const button=e(buttonId);
+  if(!button) return;
+  button.addEventListener('click',async()=>{
+    const label=logLabel||buttonId;
+    ap(`[UI] ${label}`);
+    try{
+      setLoading(button,true);
+      const result=await action();
+      if(result!==undefined) ap(result);
+    }catch(err){
+      ap(`[${label}] error: ${(err?.message)||err}`);
+    }finally{
+      setLoading(button,false);
+    }
+  });
+}
 
 function formatMessage(value){
   if(typeof value==='string') return value;
@@ -52,6 +84,12 @@ function ap(raw){
   entry.appendChild(textWrap);
 
   container.appendChild(entry);
+  delete container.dataset.empty;
+  container.removeAttribute('data-empty');
+  if(container.childElementCount>MAX_LOG_ENTRIES){
+    const first=container.firstElementChild;
+    if(first) container.removeChild(first);
+  }
   container.scrollTop=container.scrollHeight;
 }
 async function jget(u){const r=await fetch(u); return await r.json()}
@@ -105,6 +143,7 @@ function renderRiskStatsRow(profile,data,best){
   tr.dataset.profile=profile;
   if(profile===best) tr.classList.add('risk-best');
   const fmt=(value,def='—')=>value==null?def:value;
+  const labels=['Профиль','Сделок','Win‑rate','Avg PnL','Общая прибыль'];
   const cells=[
     riskProfileNames[profile]||profile,
     fmt(data?.trades),
@@ -112,9 +151,10 @@ function renderRiskStatsRow(profile,data,best){
     data?.avgProfit!=null?'$'+Number(data.avgProfit).toFixed(2):'—',
     data?.totalProfit!=null?'$'+Number(data.totalProfit).toFixed(2):'—'
   ];
-  cells.forEach(text=>{
+  cells.forEach((text,index)=>{
     const td=document.createElement('td');
     td.textContent=text;
+    td.dataset.label=labels[index];
     tr.appendChild(td);
   });
   return tr;
@@ -155,24 +195,54 @@ async function riskStats(){
   }
 }
 
-e('rpc').onclick=async()=>{ap('[UI] rpc'); ap(await jpost('/api/rpc_check',{}))}
-e('test').onclick=async()=>{ap('[UI] test'); ap(await jget('/api/test'))}
-e('modeSave').onclick=async()=>{ap('[UI] mode'); ap(await jpost('/api/mode_set',{MODE:e('modeSel').value}))}
-e('start').onclick=async()=>{ap('[UI] start'); ap(await jpost('/api/start',{}))}
-e('stop').onclick=async()=>{ap('[UI] stop'); ap(await jpost('/api/stop',{}))}
-e('osSave').onclick=async()=>{ap('[UI] osSave'); ap(await jpost('/api/opensea_set',{OPENSEA_API_KEY:e('osKey').value}))}
-e('chainSave').onclick=async()=>{ap('[UI] chain'); ap(await jpost('/api/chain_set',{chain:e('chainSel').value}))}
-e('applyContracts').onclick=async()=>{ap('[UI] patch'); ap(await jpost('/api/patch',{CONTRACTS:JSON.parse(e('contracts').value||'[]')}))}
-e('balSrcSave').onclick=async()=>{ap('[UI] balSrc'); ap(await jpost('/api/balance_source_set',{source:e('balSrc').value}))}
+function normalizeContracts(value){
+  const trimmed=(value||'').trim();
+  if(!trimmed) return [];
+  try{
+    const parsed=JSON.parse(trimmed);
+    if(Array.isArray(parsed)){
+      const cleaned=parsed.map(item=>typeof item==='string'?item.trim():item).filter(Boolean);
+      return [...new Set(cleaned)];
+    }
+    if(typeof parsed==='string'){
+      const single=parsed.trim();
+      return single?[single]:[];
+    }
+  }catch(err){
+    const tokens=trimmed.split(/[\s,]+/).map(token=>token.trim()).filter(Boolean);
+    const uniqueTokens=[...new Set(tokens)];
+    if(uniqueTokens.length && uniqueTokens.every(token=>/^0x[a-fA-F0-9]{40}$/.test(token))) return uniqueTokens;
+  }
+  throw new Error('Не удалось распознать список контрактов. Используйте JSON-массив или список адресов через пробел/перенос строки.');
+}
+
+setupAction('rpc',()=>jpost('/api/rpc_check',{}),{logLabel:'rpc'});
+setupAction('test',()=>jget('/api/test'),{logLabel:'test'});
+setupAction('modeSave',()=>jpost('/api/mode_set',{MODE:e('modeSel').value}),{logLabel:'mode'});
+setupAction('start',()=>jpost('/api/start',{}),{logLabel:'start'});
+setupAction('stop',()=>jpost('/api/stop',{}),{logLabel:'stop'});
+setupAction('osSave',()=>jpost('/api/opensea_set',{OPENSEA_API_KEY:e('osKey').value}),{logLabel:'os key'});
+setupAction('chainSave',()=>jpost('/api/chain_set',{chain:e('chainSel').value}),{logLabel:'chain'});
+setupAction('balSrcSave',()=>jpost('/api/balance_source_set',{source:e('balSrc').value}),{logLabel:'balance source'});
+setupAction('applyContracts',async()=>{
+  const contracts=normalizeContracts(e('contracts').value||'');
+  ap(`[contracts] подготовлено ${contracts.length}`);
+  const response=await jpost('/api/patch',{CONTRACTS:contracts});
+  await load();
+  return response;
+},{logLabel:'contracts'});
+setupAction('riskSave',async()=>{
+  const profile=e('riskSel').value;
+  const readable=riskProfileNames[profile]||profile;
+  ap('[UI] risk profile -> '+readable);
+  const response=await jpost('/api/risk_mode_set',{profile});
+  await load();
+  return response;
+},{logLabel:'risk profile'});
 
 async function boot(){ ap('[UI] boot'); ap(await jget('/api/js-ok')); ap(await jget('/api/ping')); ap(await jget('/api/test')); await load(); await wallet(); await kpi(); await leader(); await riskStats() }
-boot(); setInterval(async()=>{await wallet(); await kpi(); await leader(); await riskStats()}, 4000)
+async function refresh(){ await wallet(); await kpi(); await leader(); await riskStats() }
+boot(); setInterval(refresh, REFRESH_INTERVAL)
 
-e('riskSave').onclick=async()=>{
-  const v=e('riskSel').value;
-  ap('[UI] risk profile -> '+v);
-  ap(await jpost('/api/risk_mode_set',{profile:v}));
-  await load();
-}
 e('riskSel').onchange=()=>{ const v=e('riskSel').value; e('riskDesc').textContent=describeRisk(v)}
 setRiskProfileUI(e('riskSel').value);
