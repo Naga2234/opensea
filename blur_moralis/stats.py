@@ -12,11 +12,14 @@ risk={
     "last_trade_contract":"",
     "last_trade_strategy":"",
     "last_trade_size_usd":0.0,
+    "last_trade_size_native":0.0,
     "last_trade_pnl_usd":0.0,
+    "last_trade_pnl_native":0.0,
     "last_trade_note":"",
     "last_trade_action":"",
     "last_trade_ts":0.0,
     "last_trade_closed":True,
+    "last_trade_symbol":"",
 }
 stats={"by_strategy":{
     "undercut":{"wins":0,"losses":0,"avg_edge":0.0},
@@ -41,9 +44,12 @@ def register_trade_event(
     contract: Optional[str] = None,
     strategy: Optional[str] = None,
     size_usd: Optional[float] = None,
+    size_native: Optional[float] = None,
     pnl_usd: Optional[float] = None,
+    pnl_native: Optional[float] = None,
     note: Optional[str] = None,
     action: Optional[str] = None,
+    symbol: Optional[str] = None,
 ):
     now = time.time()
     risk["last_trade_status"] = status
@@ -54,12 +60,18 @@ def register_trade_event(
         risk["last_trade_strategy"] = strategy
     if size_usd is not None:
         risk["last_trade_size_usd"] = round(float(size_usd), 4)
+    if size_native is not None:
+        risk["last_trade_size_native"] = round(float(size_native), 6)
     if pnl_usd is not None:
         risk["last_trade_pnl_usd"] = round(float(pnl_usd), 4)
+    if pnl_native is not None:
+        risk["last_trade_pnl_native"] = round(float(pnl_native), 6)
     if note is not None:
         risk["last_trade_note"] = note
     if action is not None:
         risk["last_trade_action"] = action
+    if symbol is not None:
+        risk["last_trade_symbol"] = symbol
     risk["last_trade_closed"] = status in {"idle", "waiting", "skipped", "win", "loss", "filled", "error"}
 
 def _score(v:dict)->float:
@@ -101,10 +113,13 @@ def leaderboard(min_trades:int=3):
             "last_trade_contract":risk.get('last_trade_contract',''),
             "last_trade_strategy":risk.get('last_trade_strategy',''),
             "last_trade_size_usd":risk.get('last_trade_size_usd',0.0),
+            "last_trade_size_native":risk.get('last_trade_size_native',0.0),
             "last_trade_pnl_usd":risk.get('last_trade_pnl_usd',0.0),
+            "last_trade_pnl_native":risk.get('last_trade_pnl_native',0.0),
             "last_trade_note":risk.get('last_trade_note',''),
             "last_trade_action":risk.get('last_trade_action',''),
             "last_trade_ts":risk.get('last_trade_ts',0.0),
             "last_trade_closed":bool(risk.get('last_trade_closed',True)),
+            "last_trade_symbol":risk.get('last_trade_symbol',''),
         },
     }
