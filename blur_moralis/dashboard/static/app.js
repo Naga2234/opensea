@@ -1,8 +1,15 @@
 const e=id=>document.getElementById(id);
 const REFRESH_INTERVAL=4000;
 const STATUS_INTERVAL=2500;
+const LOG_INTERVAL=2500;
+const USAGE_INTERVAL=15000;
 const MAX_LOG_ENTRIES=400;
 let engineStatusTimer=null;
+let logTimer=null;
+let usageTimer=null;
+let logCursor=0;
+let lastUsageHash=null;
+let lastUsageLogTs=0;
 
 function setLoading(button, loading){
   if(!button) return;
@@ -59,8 +66,13 @@ function ap(raw){
 
   const message=formatMessage(raw);
   const match=/^\s*\[([^\]]+)\]\s*(.*)$/.exec(message);
-  const label=match?match[1]:'info';
-  const text=match?match[2]:message;
+  let label=match?match[1]:'info';
+  let text=match?match[2]:message;
+  const nested=/^\s*\[([^\]]+)\]\s*(.*)$/.exec(text);
+  if(nested){
+    label=nested[1];
+    text=nested[2]||nested[1];
+  }
   const level=detectLevel(text,label);
 
   const time=new Date().toLocaleTimeString('ru-RU',{hour12:false});
@@ -128,6 +140,122 @@ function formatTimestamp(ts){
   }catch{return null;}
 }
 
+function formatDateLike(value){
+  if(value==null) return null;
+  if(typeof value==='number'){ return formatTimestamp(value); }
+  const date=new Date(value);
+  if(Number.isNaN(date.getTime())) return null;
+  return date.toLocaleString('ru-RU',{hour12:false});
+}
+
+const tradeStateLabels={
+  starting:'Запуск движка',
+  idle:'Нет сделок',
+  waiting:'Ожидаем сигнал',
+  scanning:'Сканируем',
+  signal:'Сигнал найден',
+  entering:'Вход в сделку',
+  filled:'Заявка отправлена',
+  win:'Сделка прибыльная',
+  loss:'Сделка убыточная',
+  skipped:'Пропуск',
+  error:'Ошибка сделки',
+};
+
+const tradeProgressMap={
+  starting:12,
+  idle:8,
+  waiting:18,
+  scanning:28,
+  signal:45,
+  entering:65,
+  filled:85,
+  win:100,
+  loss:100,
+  skipped:12,
+  error:85,
+};
+
+function setTradeStatusUI(trade){
+  const container=e('tradeStatus');
+  if(!container) return;
+  const progress=e('tradeStatusProgress');
+  const badge=e('tradeStatusBadge');
+  const meta=e('tradeStatusMeta');
+  const state=(trade?.status)||'idle';
+  container.dataset.state=state;
+  if(badge){ badge.textContent=tradeStateLabels[state]||state||'—'; }
+  if(progress){
+    const width=tradeProgressMap[state]||8;
+    progress.style.width=width+'%';
+  }
+  if(meta){
+    const parts=[];
+    if(trade?.strategy) parts.push('Стратегия '+trade.strategy);
+    if(typeof trade?.contract==='string' && trade.contract) parts.push('Контракт '+trade.contract.slice(0,8)+'…');
+    if(Number.isFinite(Number(trade?.size_usd))) parts.push('Объём $'+Number(trade.size_usd).toFixed(2));
+    if(Number.isFinite(Number(trade?.pnl_usd)) && Number(trade.pnl_usd)!==0){
+      const sign=Number(trade.pnl_usd)>0?'+':'';
+      parts.push('PnL $'+sign+Number(trade.pnl_usd).toFixed(2));
+    }
+    if(trade?.note) parts.push(trade.note);
+    if(trade?.ts){
+      const ago=formatAgo((Date.now()/1000)-Number(trade.ts));
+      if(ago) parts.push('Обновлено '+ago);
+    }
+    meta.textContent=parts.length?parts.join(' · '):'Ожидаем сигнал';
+  }
+}
+
+function summarizeUsage(usage){
+  if(!usage) return 'нет данных';
+  const current=Number(usage.current);
+  const limit=Number(usage.limit);
+  const remaining=usage.remaining!=null?Number(usage.remaining):null;
+  const parts=[];
+  if(Number.isFinite(current) && Number.isFinite(limit)) parts.push(current.toFixed(2)+' / '+limit.toFixed(2)+' CU');
+  else if(Number.isFinite(current)) parts.push(current.toFixed(2)+' CU');
+  if(Number.isFinite(remaining)) parts.push('осталось '+remaining.toFixed(2)+' CU');
+  return parts.join(' · ')||'нет данных';
+}
+
+function setCuUsageUI(usage){
+  const container=e('cuUsageProgress');
+  if(!container) return;
+  const labelEl=e('cuUsageLabel');
+  const remainingEl=e('cuUsageRemaining');
+  const metaEl=e('cuUsageMeta');
+  const current=Number(usage?.current);
+  const limit=Number(usage?.limit);
+  const remaining=usage?.remaining!=null?Number(usage.remaining):null;
+  const pct=Number.isFinite(current) && Number.isFinite(limit) && limit>0?Math.min(100,Math.max(0,(current/limit)*100)):0;
+  container.style.width=pct+'%';
+  const meterWrap=container.parentElement?.parentElement;
+  const usageHolder=meterWrap?meterWrap.parentElement:null;
+  if(usageHolder) usageHolder.dataset.state=pct>=90?'critical':(pct>=70?'warn':'ok');
+  if(labelEl){
+    if(Number.isFinite(current) && Number.isFinite(limit)) labelEl.textContent=current.toFixed(2)+' / '+limit.toFixed(2)+' CU';
+    else if(Number.isFinite(current)) labelEl.textContent=current.toFixed(2)+' CU';
+    else labelEl.textContent='—';
+  }
+  if(remainingEl){
+    if(Number.isFinite(remaining)) remainingEl.textContent='осталось '+remaining.toFixed(2)+' CU';
+    else remainingEl.textContent='—';
+  }
+  if(metaEl){
+    const metaParts=[];
+    const period=usage?.period||usage?.window;
+    const reset=formatDateLike(usage?.reset_at);
+    if(period) metaParts.push(String(period));
+    if(reset) metaParts.push('Сброс '+reset);
+    if(usage?.fetched_at){
+      const ago=formatAgo((Date.now()/1000)-Number(usage.fetched_at));
+      if(ago) metaParts.push('Обновлено '+ago);
+    }
+    metaEl.textContent=metaParts.length?metaParts.join(' · '):'Нет данных';
+  }
+}
+
 function setEngineStatusUI(status){
   const container=e('engineStatus');
   const textEl=e('engineStatusText');
@@ -165,11 +293,22 @@ function setEngineStatusUI(status){
     const ago=formatAgo(status.heartbeat_ago);
     if(ago) info.push('Пульс '+ago);
   }
+  if(status?.last_trade){
+    const trade=status.last_trade;
+    const stateLabel=tradeStateLabels[trade.status]||null;
+    if(stateLabel){
+      const contractLabel=typeof trade?.contract==='string' && trade.contract?trade.contract.slice(0,8)+'…':'';
+      const note=trade?.note||'';
+      const segments=[stateLabel.toLowerCase(), contractLabel, note].filter(Boolean);
+      if(segments.length) info.push('Сделка: '+segments.join(' '));
+    }
+  }
   if(state==='idle' && !info.length){
     info.push('Готов к запуску');
   }
   textEl.textContent=label;
   metaEl.textContent=info.length?info.join(' · '):'Нет данных';
+  setTradeStatusUI(status?.last_trade);
 }
 
 async function engineStatus(){
@@ -187,6 +326,52 @@ async function engineStatus(){
 function startEngineStatusPolling(){
   if(engineStatusTimer) clearInterval(engineStatusTimer);
   engineStatusTimer=setInterval(engineStatus, STATUS_INTERVAL);
+}
+
+async function fetchLogs(){
+  try{
+    const response=await jget(`/api/logs?since=${logCursor}`);
+    const logs=response?.logs||[];
+    logs.forEach(entry=>{
+      if(entry?.id!=null) logCursor=Math.max(logCursor, Number(entry.id));
+      if(entry?.line) ap(entry.line);
+    });
+  }catch(err){
+    ap('[logs] '+(err?.message||err));
+  }
+}
+
+function startLogPolling(){
+  if(logTimer) clearInterval(logTimer);
+  fetchLogs();
+  logTimer=setInterval(fetchLogs, LOG_INTERVAL);
+}
+
+async function moralisUsage(){
+  try{
+    const response=await jget('/api/moralis_usage');
+    const usage=response?.usage||null;
+    setCuUsageUI(usage);
+    if(usage){
+      const hash=[usage.current,usage.limit,usage.remaining,usage.period,usage.reset_at].join('|');
+      const now=Date.now();
+      if(hash!==lastUsageHash || (now-lastUsageLogTs)>=60000){
+        lastUsageHash=hash;
+        lastUsageLogTs=now;
+        ap('[MORALIS][USAGE] '+summarizeUsage(usage));
+      }
+    }
+    return usage;
+  }catch(err){
+    ap('[usage] '+(err?.message||err));
+    return null;
+  }
+}
+
+function startUsagePolling(){
+  if(usageTimer) clearInterval(usageTimer);
+  moralisUsage();
+  usageTimer=setInterval(moralisUsage, USAGE_INTERVAL);
 }
 
 async function jget(u){const r=await fetch(u); return await r.json()}
@@ -371,6 +556,8 @@ async function boot(){
   await riskStats();
   await engineStatus();
   startEngineStatusPolling();
+  startLogPolling();
+  startUsagePolling();
 }
 async function refresh(){ await wallet(); await kpi(); await leader(); await riskStats() }
 boot(); setInterval(refresh, REFRESH_INTERVAL)

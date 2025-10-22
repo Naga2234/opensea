@@ -1,3 +1,6 @@
+import time
+from typing import Optional
+
 risk={
     "pnl_today_usd":0.0,
     "spend_today_usd":0.0,
@@ -5,6 +8,15 @@ risk={
     "last_trade_profit_usd":0.0,
     "auto_stop_triggered":False,
     "auto_stop_reason":"",
+    "last_trade_status":"idle",
+    "last_trade_contract":"",
+    "last_trade_strategy":"",
+    "last_trade_size_usd":0.0,
+    "last_trade_pnl_usd":0.0,
+    "last_trade_note":"",
+    "last_trade_action":"",
+    "last_trade_ts":0.0,
+    "last_trade_closed":True,
 }
 stats={"by_strategy":{
     "undercut":{"wins":0,"losses":0,"avg_edge":0.0},
@@ -21,6 +33,34 @@ def kpi():
         out[k]={"winrate": round(wr,2)}
     out["_risk"]=risk
     return out
+
+
+def register_trade_event(
+    status: str,
+    *,
+    contract: Optional[str] = None,
+    strategy: Optional[str] = None,
+    size_usd: Optional[float] = None,
+    pnl_usd: Optional[float] = None,
+    note: Optional[str] = None,
+    action: Optional[str] = None,
+):
+    now = time.time()
+    risk["last_trade_status"] = status
+    risk["last_trade_ts"] = now
+    if contract is not None:
+        risk["last_trade_contract"] = contract
+    if strategy is not None:
+        risk["last_trade_strategy"] = strategy
+    if size_usd is not None:
+        risk["last_trade_size_usd"] = round(float(size_usd), 4)
+    if pnl_usd is not None:
+        risk["last_trade_pnl_usd"] = round(float(pnl_usd), 4)
+    if note is not None:
+        risk["last_trade_note"] = note
+    if action is not None:
+        risk["last_trade_action"] = action
+    risk["last_trade_closed"] = status in {"idle", "waiting", "skipped", "win", "loss", "filled", "error"}
 
 def _score(v:dict)->float:
     n=v["wins"]+v["losses"]
@@ -57,5 +97,14 @@ def leaderboard(min_trades:int=3):
             "last_trade_profit_usd":round(risk.get('last_trade_profit_usd',0.0),2),
             "auto_stop_triggered":bool(risk.get('auto_stop_triggered')),
             "auto_stop_reason":risk.get('auto_stop_reason',''),
+            "last_trade_status":risk.get('last_trade_status','idle'),
+            "last_trade_contract":risk.get('last_trade_contract',''),
+            "last_trade_strategy":risk.get('last_trade_strategy',''),
+            "last_trade_size_usd":risk.get('last_trade_size_usd',0.0),
+            "last_trade_pnl_usd":risk.get('last_trade_pnl_usd',0.0),
+            "last_trade_note":risk.get('last_trade_note',''),
+            "last_trade_action":risk.get('last_trade_action',''),
+            "last_trade_ts":risk.get('last_trade_ts',0.0),
+            "last_trade_closed":bool(risk.get('last_trade_closed',True)),
         },
     }
