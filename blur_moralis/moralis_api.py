@@ -134,10 +134,16 @@ def _normalize_usage_payload(data: Any) -> Dict[str, Any]:
 
 
 def _usage_fingerprint(payload: Dict[str, Any]) -> str:
+    def _rounded(value: Any) -> str:
+        num = _extract_numeric(value)
+        if num is None:
+            return str(value)
+        return str(round(num, 4))
+
     keys = [
-        str(round(payload.get("current", -1), 4)),
-        str(round(payload.get("limit", -1), 4)),
-        str(round(payload.get("remaining", -1), 4)),
+        _rounded(payload.get("current", -1)),
+        _rounded(payload.get("limit", -1)),
+        _rounded(payload.get("remaining", -1)),
         str(payload.get("period", "")),
         str(payload.get("reset_at", "")),
     ]
@@ -147,16 +153,23 @@ def _usage_fingerprint(payload: Dict[str, Any]) -> str:
 def _format_usage_summary(payload: Optional[Dict[str, Any]]) -> str:
     if not payload:
         return "нет данных"
-    current = payload.get("current")
-    limit = payload.get("limit")
-    remaining = payload.get("remaining")
+    current_raw = payload.get("current")
+    limit_raw = payload.get("limit")
+    remaining_raw = payload.get("remaining")
+    current = _extract_numeric(current_raw)
+    limit = _extract_numeric(limit_raw)
+    remaining = _extract_numeric(remaining_raw)
     parts = []
     if current is not None and limit is not None:
         parts.append(f"{current:.2f}/{limit:.2f} CU")
     elif current is not None:
         parts.append(f"{current:.2f} CU")
+    elif current_raw is not None:
+        parts.append(str(current_raw))
     if remaining is not None:
         parts.append(f"осталось {remaining:.2f} CU")
+    elif remaining_raw is not None:
+        parts.append(f"осталось {remaining_raw}")
     period = payload.get("period")
     if period:
         parts.append(str(period))
