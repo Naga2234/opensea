@@ -144,14 +144,14 @@ def api_preset_lowcap_polygon():
         "CHAIN":"polygon",
         "RPC_URL":"https://polygon-rpc.com",
         "RPC_URLS": '["https://polygon-rpc.com","https://rpc.ankr.com/polygon"]',
-        "POSITION_FRACTION":"0.002",
-        "POSITION_USD_CEIL":"3",
-        "MAX_SPEND_USD_PER_DAY":"6",
-        "MAX_OPEN_POSITIONS":"1",
-        "USD_PROFIT_MIN":"0.01",
-        "GAS_MAX_FEE_GWEI":"60",
-        "GAS_PRIORITY_GWEI":"1.5",
-        "RISK_PROFILE":"lowcap_polygon",
+        "POSITION_FRACTION":"0.005",
+        "POSITION_USD_CEIL":"9",
+        "MAX_SPEND_USD_PER_DAY":"8",
+        "MAX_OPEN_POSITIONS":"2",
+        "USD_PROFIT_MIN":"0.02",
+        "GAS_MAX_FEE_GWEI":"80",
+        "GAS_PRIORITY_GWEI":"2.0",
+        "RISK_PROFILE":"balanced",
         "CONTRACTS": '["0x67F4732266C7300cca593c814d46bee72e40659F","0x2b4a66557a79263275826ad31a4cddc2789334bd","0x86935F11C86623deC8a25696E1C19a8659CbF95d"]'
     }
     for k,v in pairs.items(): setattr(settings, k, v)
@@ -260,14 +260,14 @@ def api_risk_mode_set(body: dict = Body(...)):
     else: # balanced
         pairs={
             "RISK_PROFILE":"balanced",
-            "POSITION_FRACTION":"0.002",
-            "POSITION_USD_CEIL":"3",
-            "MAX_SPEND_USD_PER_DAY":"6",
+            "POSITION_FRACTION":"0.005",
+            "POSITION_USD_CEIL":"9",
+            "MAX_SPEND_USD_PER_DAY":"8",
             "MAX_OPEN_POSITIONS":"2",
-            "USD_PROFIT_MIN":"0.01",
-            "GAS_MAX_FEE_GWEI":"60",
-            "GAS_PRIORITY_GWEI":"1.5",
-            "MORALIS_RATE_LIMIT_SEC":"90",
+            "USD_PROFIT_MIN":"0.02",
+            "GAS_MAX_FEE_GWEI":"80",
+            "GAS_PRIORITY_GWEI":"2.0",
+            "MORALIS_RATE_LIMIT_SEC":"45",
         }
     for k,v in pairs.items(): setattr(settings,k, v if not k.endswith("_SEC") and not k.endswith("_POSITIONS") else int(v) if v.isdigit() else v)
     _save_env(pairs)
