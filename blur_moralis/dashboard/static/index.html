@@ -37,6 +37,17 @@
       <button class="btn accent" id="start">Старт</button>
       <button class="btn ghost" id="stop">Стоп</button>
     </div>
+    <div class="engine-status" id="engineStatus" data-state="unknown" aria-live="polite">
+      <div class="engine-status__header">
+        <span class="engine-status__dot" aria-hidden="true"></span>
+        <span class="engine-status__label">Статус:</span>
+        <span class="engine-status__value" id="engineStatusText">—</span>
+      </div>
+      <div class="engine-status__bar" role="presentation">
+        <div class="engine-status__progress" id="engineStatusProgress"></div>
+      </div>
+      <div class="engine-status__meta muted" id="engineStatusMeta">Нет данных</div>
+    </div>
   </div>
 
   <div class="card">

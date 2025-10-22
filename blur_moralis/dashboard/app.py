@@ -147,11 +147,17 @@ def api_logs(since:int=0): return {"ok":True, "logs": get_logs(since)}
 def api_settings(): 
     return {"ok":True, "settings": {k:getattr(settings,k) for k in ["MODE","CHAIN","ADDRESS","OPENSEA_API_KEY","RPC_URL","RPC_URLS","CONTRACTS","BALANCE_SOURCE","RISK_PROFILE"]}}
 
+@app.get("/api/status")
+def api_status():
+    return {"ok": True, "status": Engine().status()}
+
 @app.post("/api/start")
-def api_start(): Engine().start(); return {"ok":True}
+def api_start():
+    engine=Engine(); engine.start(); return {"ok":True, "status": engine.status()}
 
 @app.post("/api/stop")
-def api_stop(): Engine().stop(); return {"ok":True}
+def api_stop():
+    engine=Engine(); engine.stop(); return {"ok":True, "status": engine.status()}
 
 def _save_env(pairs:dict):
     path=".env"

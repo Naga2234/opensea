@@ -1,6 +1,8 @@
 const e=id=>document.getElementById(id);
 const REFRESH_INTERVAL=4000;
+const STATUS_INTERVAL=2500;
 const MAX_LOG_ENTRIES=400;
+let engineStatusTimer=null;
 
 function setLoading(button, loading){
   if(!button) return;
@@ -92,6 +94,101 @@ function ap(raw){
   }
   container.scrollTop=container.scrollHeight;
 }
+
+function formatDuration(seconds){
+  if(seconds==null) return null;
+  const num=Number(seconds);
+  if(!Number.isFinite(num)) return null;
+  const total=Math.max(0,Math.floor(num));
+  const hours=Math.floor(total/3600);
+  const minutes=Math.floor((total%3600)/60);
+  const secs=total%60;
+  const parts=[];
+  if(hours) parts.push(hours+'ч');
+  if(minutes) parts.push(minutes+'м');
+  if(!hours && (minutes<3)) parts.push(secs+'с');
+  if(!parts.length) parts.push('0с');
+  return parts.join(' ');
+}
+
+function formatAgo(seconds){
+  if(seconds==null) return null;
+  const num=Number(seconds);
+  if(!Number.isFinite(num)) return null;
+  const formatted=formatDuration(num);
+  return formatted?formatted+' назад':null;
+}
+
+function formatTimestamp(ts){
+  if(ts==null) return null;
+  const num=Number(ts);
+  if(!Number.isFinite(num) || num<=0) return null;
+  try{
+    return new Date(num*1000).toLocaleString('ru-RU',{hour12:false});
+  }catch{return null;}
+}
+
+function setEngineStatusUI(status){
+  const container=e('engineStatus');
+  const textEl=e('engineStatusText');
+  const metaEl=e('engineStatusMeta');
+  if(!container||!textEl||!metaEl) return;
+  const state=status?.state||(status?.running?'running':status?.stopping?'stopping':(status?'idle':'unknown'));
+  container.dataset.state=state||'unknown';
+  if(state==='running'||state==='stopping') container.setAttribute('aria-busy','true');
+  else container.removeAttribute('aria-busy');
+  if(status?.running) container.dataset.running='true'; else delete container.dataset.running;
+  if(status?.stopping) container.dataset.stopping='true'; else delete container.dataset.stopping;
+  let label='—';
+  const info=[];
+  if(state==='running'){
+    label='Работает';
+    const uptime=formatDuration(status?.uptime);
+    if(uptime) info.push('Аптайм '+uptime);
+  }else if(state==='stopping'){
+    label='Останавливается';
+    if(status?.stop_reason) info.push(status.stop_reason);
+    else info.push('Ждём завершения операций');
+  }else if(state==='idle'){
+    label='Остановлен';
+  }else{
+    label='Нет данных';
+  }
+  if(state==='idle' && status?.stop_reason){
+    info.push(status.stop_reason);
+  }
+  if(state==='idle' && !status?.stop_reason){
+    const stopped=formatTimestamp(status?.stopped_at);
+    if(stopped) info.push('Остановлен '+stopped);
+  }
+  if(status?.heartbeat_ago!=null){
+    const ago=formatAgo(status.heartbeat_ago);
+    if(ago) info.push('Пульс '+ago);
+  }
+  if(state==='idle' && !info.length){
+    info.push('Готов к запуску');
+  }
+  textEl.textContent=label;
+  metaEl.textContent=info.length?info.join(' · '):'Нет данных';
+}
+
+async function engineStatus(){
+  try{
+    const response=await jget('/api/status');
+    setEngineStatusUI(response.status);
+    return response;
+  }catch(err){
+    setEngineStatusUI(null);
+    ap('[status] '+(err?.message||err));
+    return null;
+  }
+}
+
+function startEngineStatusPolling(){
+  if(engineStatusTimer) clearInterval(engineStatusTimer);
+  engineStatusTimer=setInterval(engineStatus, STATUS_INTERVAL);
+}
+
 async function jget(u){const r=await fetch(u); return await r.json()}
 async function jpost(u,b){const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b||{})}); return await r.json()}
 
@@ -219,8 +316,30 @@ function normalizeContracts(value){
 setupAction('rpc',()=>jpost('/api/rpc_check',{}),{logLabel:'rpc'});
 setupAction('test',()=>jget('/api/test'),{logLabel:'test'});
 setupAction('modeSave',()=>jpost('/api/mode_set',{MODE:e('modeSel').value}),{logLabel:'mode'});
-setupAction('start',()=>jpost('/api/start',{}),{logLabel:'start'});
-setupAction('stop',()=>jpost('/api/stop',{}),{logLabel:'stop'});
+setupAction('start',async()=>{
+  setEngineStatusUI({state:'running',running:true,uptime:0,heartbeat_ago:0});
+  try{
+    const response=await jpost('/api/start',{});
+    if(response?.status) setEngineStatusUI(response.status); else await engineStatus();
+    startEngineStatusPolling();
+    return response;
+  }catch(err){
+    await engineStatus();
+    throw err;
+  }
+},{logLabel:'start'});
+setupAction('stop',async()=>{
+  setEngineStatusUI({state:'stopping',stopping:true});
+  try{
+    const response=await jpost('/api/stop',{});
+    if(response?.status) setEngineStatusUI(response.status); else await engineStatus();
+    startEngineStatusPolling();
+    return response;
+  }catch(err){
+    await engineStatus();
+    throw err;
+  }
+},{logLabel:'stop'});
 setupAction('osSave',()=>jpost('/api/opensea_set',{OPENSEA_API_KEY:e('osKey').value}),{logLabel:'os key'});
 setupAction('chainSave',()=>jpost('/api/chain_set',{chain:e('chainSel').value}),{logLabel:'chain'});
 setupAction('balSrcSave',()=>jpost('/api/balance_source_set',{source:e('balSrc').value}),{logLabel:'balance source'});
@@ -240,7 +359,19 @@ setupAction('riskSave',async()=>{
   return response;
 },{logLabel:'risk profile'});
 
-async function boot(){ ap('[UI] boot'); ap(await jget('/api/js-ok')); ap(await jget('/api/ping')); ap(await jget('/api/test')); await load(); await wallet(); await kpi(); await leader(); await riskStats() }
+async function boot(){
+  ap('[UI] boot');
+  ap(await jget('/api/js-ok'));
+  ap(await jget('/api/ping'));
+  ap(await jget('/api/test'));
+  await load();
+  await wallet();
+  await kpi();
+  await leader();
+  await riskStats();
+  await engineStatus();
+  startEngineStatusPolling();
+}
 async function refresh(){ await wallet(); await kpi(); await leader(); await riskStats() }
 boot(); setInterval(refresh, REFRESH_INTERVAL)
 

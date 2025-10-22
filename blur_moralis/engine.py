@@ -15,10 +15,22 @@ class Engine:
         return cls._inst
     def __init__(self):
         if getattr(self,'_initd',False): return
-        self._initd=True; self._stop=True; self._thread=None; self._w3=None; self._ex=None; self._stop_reason=None
+        self._initd=True
+        self._stop=True
+        self._thread=None
+        self._w3=None
+        self._ex=None
+        self._stop_reason=None
+        self._started_at=None
+        self._stopped_at=None
+        self._last_heartbeat=None
     def start(self):
         if self._thread and self._thread.is_alive(): return
-        self._stop=False; self._stop_reason=None
+        self._stop=False
+        self._stop_reason=None
+        self._started_at=time.time()
+        self._stopped_at=None
+        self._last_heartbeat=None
         risk["auto_stop_triggered"]=False; risk["auto_stop_reason"]=""; risk["last_trade_profit_usd"]=0.0
         self._thread=threading.Thread(target=self.run,daemon=True); self._thread.start(); log("[ENGINE] started")
     def stop(self, reason: Optional[str]=None):
@@ -28,6 +40,31 @@ class Engine:
             log(f"[ENGINE] stop signal ({reason})")
         else:
             log("[ENGINE] stop signal")
+    def status(self):
+        now=time.time()
+        thread_alive=self._thread.is_alive() if self._thread else False
+        if thread_alive and not self._stop:
+            state="running"
+        elif thread_alive and self._stop:
+            state="stopping"
+        else:
+            state="idle"
+        if state=="idle" and not self._stopped_at and self._started_at and not thread_alive:
+            self._stopped_at=self._last_heartbeat or now
+        uptime=now-(self._started_at or now)
+        if state=="idle": uptime=max(0.0, (self._stopped_at or now)-(self._started_at or now))
+        heartbeat_age=(now-(self._last_heartbeat or now)) if self._last_heartbeat else None
+        return {
+            "state": state,
+            "running": state=="running",
+            "stopping": state=="stopping",
+            "uptime": max(0.0, uptime) if self._started_at else 0.0,
+            "started_at": self._started_at,
+            "stopped_at": self._stopped_at,
+            "last_heartbeat": self._last_heartbeat,
+            "heartbeat_ago": heartbeat_age,
+            "stop_reason": self._stop_reason,
+        }
     def _connect(self):
         urls=[settings.RPC_URL]+(rpc_urls() or [])
         for u in [x for x in urls if x]:
@@ -58,8 +95,10 @@ class Engine:
     def run(self):
         if not self._connect(): log("[ENGINE] no RPC, sleeping"); time.sleep(3); return
         log("[ENGINE] loop enter")
+        self._last_heartbeat=time.time()
         px=price_usd(settings.CHAIN) or 0.0
         while not self._stop:
+            self._last_heartbeat=time.time()
             for c in contracts() or []:
                 if random.random()<0.1:
                     _ = recent_trades(c, limit=1)
@@ -109,4 +148,6 @@ class Engine:
                     time.sleep(0.2)
                 if self._stop: break
             time.sleep(1.0)
+        self._last_heartbeat=time.time()
+        self._stopped_at=self._last_heartbeat
         log(f"[ENGINE] loop exit ({self._stop_reason or 'stopped'})")
