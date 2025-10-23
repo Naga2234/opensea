@@ -99,6 +99,8 @@ def api_wallet():
         "address": settings.ADDRESS,
         "rpc": used,
         "source": src,
+        "collection": [],
+        "collection_count": 0,
     }
     if settings.MODE == "paper":
         snapshot = paper_wallet.snapshot(price=px, symbol=symbol)
