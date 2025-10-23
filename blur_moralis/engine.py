@@ -15,6 +15,7 @@ from .pricing import price_usd
 from .moralis_api import recent_trades
 from .stats import stats, risk, register_trade_event
 from web3 import Web3
+from . import paper_wallet
 
 class Engine:
     _inst=None
@@ -157,11 +158,14 @@ class Engine:
         elif not urls or not any(urls):
             self._stop_reason="RPC connect failed: no RPC URLs configured"
         return False
-    def _usd_balance(self)->float:
-        if not self._w3 or not settings.ADDRESS: return 0.0
-        bal=self._w3.eth.get_balance(Web3.to_checksum_address(settings.ADDRESS))/1e18
-        px=self._to_float(price_usd(settings.CHAIN) or 0.0, 0.0)
-        return self._to_float(bal, 0.0)*px
+    def _native_balance(self) -> float:
+        if not self._w3 or not settings.ADDRESS:
+            return 0.0
+        try:
+            bal = self._w3.eth.get_balance(Web3.to_checksum_address(settings.ADDRESS)) / 1e18
+        except Exception:
+            return 0.0
+        return self._to_float(bal, 0.0)
     def _check_auto_stop(self, trade_profit: Optional[float]=None):
         if self._stop: return
         threshold=self._to_float(getattr(settings,"AUTO_STOP_PROFIT_USD",0.0) or 0.0, 0.0)
@@ -229,6 +233,9 @@ class Engine:
             while not self._stop:
                 px=self._to_float(price_usd(settings.CHAIN) or 0.0, 0.0)
                 symbol=native_symbol(settings.CHAIN)
+                native_balance = self._to_float(self._native_balance(), 0.0)
+                if settings.MODE == "paper":
+                    paper_wallet.bootstrap(native_balance, price=px, symbol=symbol)
                 self._last_heartbeat=time.time()
                 for c in contracts() or []:
                     if isinstance(c, str):
@@ -260,7 +267,12 @@ class Engine:
                     edge=self._to_float(abs(random.gauss(0.008,0.006)), 0.0)
                     fee=0.025
                     gas_usd = 0.02 if settings.CHAIN=='polygon' else 1.0
-                    bal_usd=self._to_float(self._usd_balance(),0.0)
+                    if settings.MODE == "paper":
+                        snapshot = paper_wallet.snapshot(price=px, symbol=symbol)
+                        current_native = self._to_float(snapshot.get("balance_native"), native_balance)
+                    else:
+                        current_native = native_balance
+                    bal_usd=self._to_float(current_native*px,0.0)
                     safe_balance=max(bal_usd, 50.0)
                     ev=self._to_float(edge - fee - (gas_usd / safe_balance),0.0)
                     edge_pct=edge*100.0
@@ -348,6 +360,17 @@ class Engine:
                             log(f"[STATUS][RUNNING][ERROR] {short_c} — не удалось купить: {e}")
                     else:
                         PaperExecutor().buy(trade, size_amount)
+                        if settings.MODE == "paper":
+                            paper_wallet.record_buy(
+                                trade,
+                                size_native=size_native,
+                                size_usd=size_usd,
+                                price=px,
+                                symbol=symbol,
+                            )
+                            snapshot = paper_wallet.snapshot(price=px, symbol=symbol)
+                            current_native = self._to_float(snapshot.get("balance_native"), current_native)
+                            native_balance = current_native
                         log(f"[TRADE][PAPER][BUY] {strategy} {short_c} size=${size_usd:.2f} (~{size_amount:.4f} {chain_label} unit)")
                         log(f"[STATUS][RUNNING][BUY] {short_c} — бумажная покупка {strategy} на ${size_usd:.2f} (~{size_amount:.4f} {chain_label})")
                         risk["spend_today_usd"]=self._to_float(risk.get("spend_today_usd",0.0),0.0)+size_usd
@@ -374,6 +397,18 @@ class Engine:
                             )
                             log(f"[TRADE][RESULT][WIN] {strategy} {short_c} +${profit:.2f}")
                             log(f"[STATUS][RUNNING][SELL] {short_c} — фиксация прибыли ${profit:.2f} по стратегии {strategy}")
+                            if settings.MODE == "paper":
+                                paper_wallet.record_result(
+                                    c,
+                                    trade.get("token_id"),
+                                    pnl_native=profit_native,
+                                    pnl_usd=profit,
+                                    price=px,
+                                    symbol=symbol,
+                                )
+                                snapshot = paper_wallet.snapshot(price=px, symbol=symbol)
+                                current_native = self._to_float(snapshot.get("balance_native"), current_native)
+                                native_balance = current_native
                         else:
                             stats["by_strategy"][strategy]["losses"]+=1
                             loss=self._to_float(min(0.5, size_usd*0.5),0.0)
@@ -394,6 +429,18 @@ class Engine:
                             )
                             log(f"[TRADE][RESULT][LOSS] {strategy} {short_c} -${loss:.2f}")
                             log(f"[STATUS][RUNNING][SELL] {short_c} — фиксация убытка ${loss:.2f} по стратегии {strategy}")
+                            if settings.MODE == "paper":
+                                paper_wallet.record_result(
+                                    c,
+                                    trade.get("token_id"),
+                                    pnl_native=loss_native,
+                                    pnl_usd=-loss,
+                                    price=px,
+                                    symbol=symbol,
+                                )
+                                snapshot = paper_wallet.snapshot(price=px, symbol=symbol)
+                                current_native = self._to_float(snapshot.get("balance_native"), current_native)
+                                native_balance = current_native
                             try:
                                 current_streak=int(risk.get("loss_streak",0))
                             except (TypeError, ValueError):
