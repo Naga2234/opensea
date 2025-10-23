@@ -5,11 +5,14 @@ const LOG_INTERVAL=2500;
 const USAGE_INTERVAL=15000;
 const MAX_LOG_ENTRIES=400;
 const LOG_SCROLL_THRESHOLD=32;
+const LOG_CONTAINERS={
+  important:{id:'logImportant',autoScroll:true},
+  other:{id:'logOther',autoScroll:true}
+};
 let engineStatusTimer=null;
 let logTimer=null;
 let usageTimer=null;
 let logCursor=0;
-let logAutoScroll=true;
 let lastUsageHash=null;
 let lastUsageLogTs=0;
 let strategyStatus=null;
@@ -83,10 +86,21 @@ function isNearLogBottom(container){
   return distance<=LOG_SCROLL_THRESHOLD;
 }
 
-function updateLogScrollState(container){
-  if(!container) return;
+function getLogMeta(kind){
+  return LOG_CONTAINERS[kind]||LOG_CONTAINERS.other;
+}
+
+function getLogContainer(kind){
+  const meta=getLogMeta(kind);
+  return e(meta.id);
+}
+
+function updateLogScrollState(kind){
+  const meta=getLogMeta(kind);
+  const container=getLogContainer(kind);
+  if(!container||!meta) return;
   const sticky=isNearLogBottom(container);
-  logAutoScroll=sticky;
+  meta.autoScroll=sticky;
   if(sticky){
     delete container.dataset.paused;
     container.removeAttribute('data-paused');
@@ -96,36 +110,23 @@ function updateLogScrollState(container){
 }
 
 function setupLogScrollHandling(){
-  const container=e('log');
-  if(!container) return;
-  updateLogScrollState(container);
-  container.addEventListener('scroll',()=>{
-    updateLogScrollState(container);
+  Object.keys(LOG_CONTAINERS).forEach(kind=>{
+    const container=getLogContainer(kind);
+    if(!container) return;
+    updateLogScrollState(kind);
+    container.addEventListener('scroll',()=>{
+      updateLogScrollState(kind);
+    });
   });
 }
 
-function ap(raw){
-  const container=e('log');
-  if(!container) return;
-
-  const message=formatMessage(raw);
-  const match=/^\s*\[([^\]]+)\]\s*(.*)$/.exec(message);
-  let label=match?match[1]:'info';
-  let text=match?match[2]:message;
-  const nested=/^\s*\[([^\]]+)\]\s*(.*)$/.exec(text);
-  if(nested){
-    label=nested[1];
-    text=nested[2]||nested[1];
-  }
-  const level=detectLevel(text,label);
-
-  const time=new Date().toLocaleTimeString('ru-RU',{hour12:false});
+function createLogEntry(level,label,text){
   const entry=document.createElement('div');
   entry.className=`log-entry ${level}`;
 
   const timeEl=document.createElement('span');
   timeEl.className='log-time';
-  timeEl.textContent=time;
+  timeEl.textContent=new Date().toLocaleTimeString('ru-RU',{hour12:false});
 
   const textWrap=document.createElement('div');
   const labelEl=document.createElement('span');
@@ -141,19 +142,55 @@ function ap(raw){
   entry.appendChild(timeEl);
   entry.appendChild(textWrap);
 
+  return entry;
+}
+
+function appendLogEntry(kind, entry){
+  const meta=getLogMeta(kind);
+  const container=getLogContainer(kind);
+  if(!container||!meta||!entry) return;
+
   container.appendChild(entry);
   delete container.dataset.empty;
   container.removeAttribute('data-empty');
+
   if(container.childElementCount>MAX_LOG_ENTRIES){
     const first=container.firstElementChild;
     if(first) container.removeChild(first);
   }
-  if(logAutoScroll||isNearLogBottom(container)){
+
+  const shouldStick=meta.autoScroll||isNearLogBottom(container);
+  if(shouldStick){
     container.scrollTop=container.scrollHeight;
-    logAutoScroll=true;
+    meta.autoScroll=true;
     delete container.dataset.paused;
     container.removeAttribute('data-paused');
+  }else{
+    meta.autoScroll=false;
+    container.dataset.paused='true';
   }
+}
+
+function isImportantLog(message,label,text){
+  const source=[message,label,text].filter(Boolean).join(' ').toLowerCase();
+  const keywords=['buy','sell','trade','profit','loss','покуп','продаж','сделк','фиксац','профит','убыт'];
+  return keywords.some(keyword=>source.includes(keyword));
+}
+
+function ap(raw){
+  const message=formatMessage(raw);
+  const match=/^\s*\[([^\]]+)\]\s*(.*)$/.exec(message);
+  let label=match?match[1]:'info';
+  let text=match?match[2]:message;
+  const nested=/^\s*\[([^\]]+)\]\s*(.*)$/.exec(text);
+  if(nested){
+    label=nested[1];
+    text=nested[2]||nested[1];
+  }
+  const level=detectLevel(text,label);
+  const kind=isImportantLog(message,label,text)?'important':'other';
+  const entry=createLogEntry(level,label,text);
+  appendLogEntry(kind, entry);
 }
 
 function formatDuration(seconds){

@@ -170,7 +170,16 @@
 
   <div class="card" style="grid-column:1 / -1">
     <h3>Лог</h3>
-    <div id="log" class="log-panel" aria-live="polite" data-empty="true"></div>
+    <div class="log-split">
+      <div class="log-column">
+        <h4>Важные события</h4>
+        <div id="logImportant" class="log-panel" aria-live="polite" data-empty="true"></div>
+      </div>
+      <div class="log-column">
+        <h4>Остальные события</h4>
+        <div id="logOther" class="log-panel" aria-live="polite" data-empty="true"></div>
+      </div>
+    </div>
   </div>
 </div>
 
