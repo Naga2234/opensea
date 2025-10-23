@@ -27,15 +27,21 @@ class Settings(BaseSettings):
     )
     BALANCE_SOURCE: str = "auto"  # auto | rpc | moralis
     POSITION_FRACTION: float = 0.005
-    POSITION_USD_CEIL: float = 9.0
+    POSITION_USD_CEIL: float = 12.0
     MAX_SPEND_USD_PER_DAY: float = 8.0
     MAX_OPEN_POSITIONS: int = 2
-    USD_PROFIT_MIN: float = 0.02
+    USD_PROFIT_MIN: float = 0.03
+    EDGE_MIN_PCT: float = 3.0
+    WINDOW_MINUTES: int = 60
+    MIN_TRADES_IN_WINDOW: int = 5
+    MIN_UNIQUE_BUYERS: int = 3
+    MIN_VOLUME_USD_WINDOW: float = 100.0
     AUTO_STOP_PROFIT_USD: float = 0.15
     STRATEGY_MODE: str = "auto"  # auto | manual
     MANUAL_STRATEGY: str = "undercut"
     GAS_MAX_FEE_GWEI: float = 80.0
     GAS_PRIORITY_GWEI: float = 2.0
+    GAS_QUANTILE_MAX: float = 0.30
     CONTRACTS: str = (
         "[\"0x86935F11C86623deC8a25696E1C19a8659CbF95d\","
         "\"0x67F4732266C7300cca593C814d46bee72e40659F\","
@@ -43,6 +49,7 @@ class Settings(BaseSettings):
         "\"0x670fd103b1a08628e9557cD66B87DeD841115190\"]"
     )
     MORALIS_RATE_LIMIT_SEC: int = 45
+    MORALIS_TRADES_CHAIN: str = "polygon"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", case_sensitive=False)
 

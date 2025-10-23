@@ -29,7 +29,8 @@ def _allow(key: str, *, gap: Optional[int] = None) -> bool:
     return False
 
 def _chain_param()->str:
-    c=(settings.CHAIN or "eth").lower()
+    raw = getattr(settings, "MORALIS_TRADES_CHAIN", None) or settings.CHAIN or "eth"
+    c = str(raw).strip().lower()
     if c in ("eth","ethereum","mainnet"): return "eth"
     if c in ("polygon","matic"): return "polygon"
     return "eth"

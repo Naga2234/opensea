@@ -1,5 +1,6 @@
 import threading, time, random
-from typing import Optional
+from datetime import datetime
+from typing import Optional, Tuple
 from .runtime import log
 from .config import (
     settings,
@@ -214,6 +215,176 @@ class Engine:
         elif mode=="auto":
             log("[СТРАТЕГИЯ] автоматический выбор — набор стратегий переключается автоматически")
 
+    def _coerce_timestamp(self, value) -> Optional[float]:
+        if value is None:
+            return None
+        if isinstance(value, (int, float)):
+            ts=float(value)
+            while ts>1e12:
+                ts/=1000.0
+            if ts>1e10:
+                ts/=1000.0
+            return ts
+        if isinstance(value, str):
+            txt=value.strip()
+            if not txt:
+                return None
+            try:
+                return self._coerce_timestamp(float(txt))
+            except (TypeError, ValueError):
+                pass
+            try:
+                if txt.endswith("Z"):
+                    txt = txt[:-1] + "+00:00"
+                return datetime.fromisoformat(txt).timestamp()
+            except ValueError:
+                return None
+        return None
+
+    def _parse_trade_timestamp(self, trade: dict) -> Optional[float]:
+        for key in (
+            "block_timestamp",
+            "blockTimestamp",
+            "timestamp",
+            "ts",
+            "time",
+            "created_at",
+            "createdAt",
+            "event_timestamp",
+        ):
+            if key in trade:
+                ts=self._coerce_timestamp(trade.get(key))
+                if ts is not None:
+                    return ts
+        return None
+
+    def _as_positive_float(self, value) -> Optional[float]:
+        if value is None:
+            return None
+        try:
+            num=float(value)
+        except (TypeError, ValueError):
+            return None
+        if num<0:
+            return None
+        return num
+
+    def _parse_trade_usd(self, trade: dict) -> Optional[float]:
+        for key in (
+            "price_usd",
+            "usd_price",
+            "usdPrice",
+            "priceUsd",
+            "sale_price_usd",
+            "total_price_usd",
+            "value_usd",
+            "valueUsd",
+        ):
+            if key in trade:
+                usd=self._as_positive_float(trade.get(key))
+                if usd is not None:
+                    return usd
+        native=trade.get("native_price") or trade.get("nativePrice")
+        if isinstance(native, dict):
+            if "usd" in native or "usd_price" in native or "usdPrice" in native:
+                usd=self._as_positive_float(native.get("usd") or native.get("usd_price") or native.get("usdPrice"))
+                if usd is not None:
+                    return usd
+            native_value=native.get("value") or native.get("amount")
+            decimals=native.get("decimals")
+            maybe=self._as_positive_float(native_value)
+            if maybe is not None and decimals is not None:
+                try:
+                    scale=10 ** int(decimals)
+                    if scale>0:
+                        return maybe/scale
+                except (TypeError, ValueError):
+                    pass
+        token=trade.get("payment_token") or trade.get("paymentToken")
+        if isinstance(token, dict):
+            usd_price=self._as_positive_float(token.get("usd_price") or token.get("usdPrice"))
+            amount=self._as_positive_float(trade.get("total_price") or trade.get("price"))
+            decimals=token.get("decimals")
+            if amount is not None and usd_price is not None:
+                try:
+                    if decimals is not None:
+                        scale=10 ** int(decimals)
+                        if scale>0:
+                            amount/=scale
+                except (TypeError, ValueError):
+                    pass
+                return amount*usd_price
+        fallback=self._as_positive_float(trade.get("price") or trade.get("total_price"))
+        return fallback
+
+    def _extract_buyer(self, trade: dict) -> Optional[str]:
+        for key in (
+            "buyer_address",
+            "buyerAddress",
+            "buyer",
+            "to_address",
+            "toAddress",
+            "to",
+            "winner_address",
+            "winnerAddress",
+        ):
+            if key in trade:
+                value=trade.get(key)
+                if isinstance(value, str):
+                    candidate=value.strip()
+                    if candidate:
+                        return candidate
+        buyer=trade.get("buyer") or trade.get("to_account") or trade.get("toAccount")
+        if isinstance(buyer, dict):
+            for field in ("address", "wallet_address", "walletAddress"):
+                value=buyer.get(field)
+                if isinstance(value, str):
+                    candidate=value.strip()
+                    if candidate:
+                        return candidate
+        return None
+
+    def _evaluate_liquidity(self, trades) -> Tuple[bool, str]:
+        window_minutes=int(getattr(settings, "WINDOW_MINUTES", 0) or 0)
+        min_trades=int(getattr(settings, "MIN_TRADES_IN_WINDOW", 0) or 0)
+        min_buyers=int(getattr(settings, "MIN_UNIQUE_BUYERS", 0) or 0)
+        min_volume=self._to_float(getattr(settings, "MIN_VOLUME_USD_WINDOW", 0.0) or 0.0, 0.0)
+        if window_minutes<=0 and min_trades==0 and min_buyers==0 and min_volume<=0:
+            return True, "требования к ликвидности отключены"
+        if window_minutes<=0:
+            window_minutes=60
+        dataset=trades or []
+        if not dataset:
+            if min_trades or min_buyers or min_volume:
+                return False, "нет данных по последним сделкам"
+            return True, "требования к ликвидности отключены"
+        since=time.time() - float(window_minutes)*60.0
+        count=0
+        buyers=set()
+        volume=0.0
+        for trade in dataset:
+            if not isinstance(trade, dict):
+                continue
+            ts=self._parse_trade_timestamp(trade)
+            if ts is None or ts<since:
+                continue
+            count+=1
+            buyer=self._extract_buyer(trade)
+            if buyer:
+                buyers.add(buyer.lower())
+            usd=self._parse_trade_usd(trade)
+            if usd is not None:
+                volume+=max(0.0, usd)
+        if min_trades and count<min_trades:
+            return False, f"недостаточно сделок: {count}/{min_trades} за {window_minutes} мин"
+        if min_buyers and len(buyers)<min_buyers:
+            return False, f"мало покупателей: {len(buyers)}/{min_buyers} за {window_minutes} мин"
+        if min_volume and volume<min_volume:
+            return False, f"объём ${volume:.2f} < {min_volume:.2f} за {window_minutes} мин"
+        if count==0 and (min_trades or min_buyers or min_volume):
+            return False, "сделки за окно не найдены"
+        return True, f"ликвидность ok: {count} сделок, {len(buyers)} покупателей, объём ${volume:.2f}"
+
     def run(self):
         try:
             if not self._w3 or not self._ex:
@@ -245,8 +416,6 @@ class Engine:
                     register_trade_event("scanning", contract=c, note=f"Проверяем {short_c}", action="scan")
                     log(f"[ENGINE][SCAN] {short_c} — проверка сигнала")
                     log(f"[STATUS][RUNNING][SCAN] Просмотр предложения по {short_c}")
-                    if random.random()<0.1:
-                        _ = recent_trades(c, limit=1)
                     trigger=random.random()
                     if trigger>=0.05:
                         log(f"[ENGINE][WAIT] {short_c} — сигнала нет")
@@ -264,9 +433,28 @@ class Engine:
                     self._announce_strategy(strategy_mode, strategy)
                     register_trade_event("signal", contract=c, strategy=strategy, note=f"Сигнал {strategy} обнаружен", action="signal")
                     log(f"[STATUS][RUNNING][SIGNAL] {short_c} — стратегия {strategy}")
+                    trades = recent_trades(c, limit=25)
+                    liquidity_ok, liquidity_note = self._evaluate_liquidity(trades)
+                    if not liquidity_ok:
+                        log(f"[РЕШЕНИЕ][SKIP] {short_c} — {liquidity_note}. Пропускаем сигнал")
+                        register_trade_event(
+                            "skipped",
+                            contract=c,
+                            strategy=strategy,
+                            note=f"Пропуск: {liquidity_note}",
+                            action="skip",
+                        )
+                        log(f"[STATUS][RUNNING][SKIP] {short_c} — {liquidity_note}; двигаемся дальше")
+                        time.sleep(0.1)
+                        continue
+                    if liquidity_note:
+                        log(f"[ENGINE][LIQ] {short_c} — {liquidity_note}")
                     edge=self._to_float(abs(random.gauss(0.008,0.006)), 0.0)
                     fee=0.025
                     gas_usd = 0.02 if settings.CHAIN=='polygon' else 1.0
+                    gas_quantile=self._to_float(getattr(settings, "GAS_QUANTILE_MAX", 1.0) or 1.0, 1.0)
+                    if 0.0 < gas_quantile < 1.0:
+                        gas_usd*=gas_quantile
                     if settings.MODE == "paper":
                         snapshot = paper_wallet.snapshot(price=px, symbol=symbol)
                         current_native = self._to_float(snapshot.get("balance_native"), native_balance)
@@ -278,6 +466,22 @@ class Engine:
                     edge_pct=edge*100.0
                     fee_pct=fee*100.0
                     usd_min=self._to_float(getattr(settings, "USD_PROFIT_MIN", 0.01) or 0.01, 0.01)
+                    edge_min=self._to_float(getattr(settings, "EDGE_MIN_PCT", 0.0) or 0.0, 0.0)
+                    if edge_min>0 and edge_pct<edge_min:
+                        skip_reason=(
+                            f"стратегия {strategy}: edge={edge_pct:.2f}% ниже порога {edge_min:.2f}%"
+                        )
+                        log(f"[РЕШЕНИЕ][SKIP] {short_c} — {skip_reason}. Пропускаем сигнал")
+                        register_trade_event(
+                            "skipped",
+                            contract=c,
+                            strategy=strategy,
+                            note=f"Пропуск: edge={edge_pct:.2f}% < {edge_min:.2f}%",
+                            action="skip",
+                        )
+                        log(f"[STATUS][RUNNING][SKIP] {short_c} — {skip_reason}; двигаемся дальше")
+                        time.sleep(0.1)
+                        continue
                     if ev<=0 or edge_pct<usd_min:
                         skip_reason=(
                             f"стратегия {strategy}: edge={edge_pct:.2f}% не покрывает комиссию {fee_pct:.2f}% "
