@@ -9,6 +9,7 @@ const LOG_CONTAINERS={
   important:{id:'logImportant',autoScroll:true},
   other:{id:'logOther',autoScroll:true}
 };
+let activeLogKind='important';
 let engineStatusTimer=null;
 let logTimer=null;
 let usageTimer=null;
@@ -118,6 +119,91 @@ function setupLogScrollHandling(){
       updateLogScrollState(kind);
     });
   });
+}
+
+function normalizeLogKind(kind){
+  if(kind && LOG_CONTAINERS[kind]) return kind;
+  if(LOG_CONTAINERS.important) return 'important';
+  return Object.keys(LOG_CONTAINERS)[0]||null;
+}
+
+function updateLogTabsUI(){
+  const normalized=normalizeLogKind(activeLogKind);
+  if(normalized) activeLogKind=normalized;
+  const tabs=Array.from(document.querySelectorAll('.log-tab[data-log-kind]'));
+  if(tabs.length){
+    if(!tabs.some(tab=>tab.dataset.logKind===activeLogKind)){
+      const fallback=tabs[0];
+      activeLogKind=fallback?.dataset?.logKind||normalizeLogKind(activeLogKind);
+    }
+    tabs.forEach(tab=>{
+      const kind=tab.dataset.logKind;
+      const isActive=kind===activeLogKind;
+      tab.classList.toggle('is-active', isActive);
+      tab.setAttribute('aria-selected', isActive?'true':'false');
+      tab.setAttribute('tabindex', isActive?'0':'-1');
+    });
+  }
+
+  Object.entries(LOG_CONTAINERS).forEach(([kind,meta])=>{
+    const container=getLogContainer(kind);
+    if(!container) return;
+    const isActive=kind===activeLogKind;
+    container.classList.toggle('is-active', isActive);
+    if(isActive){
+      container.hidden=false;
+      container.removeAttribute('hidden');
+      container.removeAttribute('aria-hidden');
+      container.setAttribute('tabindex','0');
+      if(meta.autoScroll){
+        container.scrollTop=container.scrollHeight;
+        delete container.dataset.paused;
+        container.removeAttribute('data-paused');
+      }
+    }else{
+      container.hidden=true;
+      container.setAttribute('aria-hidden','true');
+      container.setAttribute('tabindex','-1');
+    }
+  });
+
+  if(activeLogKind){
+    updateLogScrollState(activeLogKind);
+  }
+}
+
+function activateLogTab(kind){
+  const normalized=normalizeLogKind(kind);
+  if(!normalized) return;
+  if(activeLogKind===normalized){
+    updateLogTabsUI();
+    return;
+  }
+  activeLogKind=normalized;
+  updateLogTabsUI();
+}
+
+function setupLogTabs(){
+  const tabs=Array.from(document.querySelectorAll('.log-tab[data-log-kind]'));
+  if(!tabs.length) return;
+  const preselected=tabs.find(tab=>tab.classList.contains('is-active') && tab.dataset.logKind);
+  activeLogKind=normalizeLogKind(preselected?.dataset?.logKind||activeLogKind);
+  tabs.forEach((tab,index)=>{
+    tab.addEventListener('click',()=>{
+      activateLogTab(tab.dataset.logKind);
+    });
+    tab.addEventListener('keydown',event=>{
+      if(event.key==='ArrowRight' || event.key==='ArrowLeft'){
+        event.preventDefault();
+        const dir=event.key==='ArrowRight'?1:-1;
+        const nextIndex=(index+dir+tabs.length)%tabs.length;
+        const nextTab=tabs[nextIndex];
+        nextTab?.focus();
+        activateLogTab(nextTab?.dataset?.logKind);
+      }
+    });
+  });
+  updateLogTabsUI();
 }
 
 function createLogEntry(level,label,text){
@@ -735,6 +821,7 @@ async function boot(){
   startUsagePolling();
 }
 async function refresh(){ await wallet(); await kpi(); await leader(); await riskStats(); await loadStrategy() }
+setupLogTabs();
 setupLogScrollHandling();
 boot(); setInterval(refresh, REFRESH_INTERVAL)
 
