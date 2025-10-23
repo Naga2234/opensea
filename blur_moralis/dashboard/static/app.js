@@ -4,10 +4,12 @@ const STATUS_INTERVAL=2500;
 const LOG_INTERVAL=2500;
 const USAGE_INTERVAL=15000;
 const MAX_LOG_ENTRIES=400;
+const LOG_SCROLL_THRESHOLD=32;
 let engineStatusTimer=null;
 let logTimer=null;
 let usageTimer=null;
 let logCursor=0;
+let logAutoScroll=true;
 let lastUsageHash=null;
 let lastUsageLogTs=0;
 let strategyStatus=null;
@@ -75,6 +77,33 @@ function detectLevel(text,label){
   return 'info';
 }
 
+function isNearLogBottom(container){
+  if(!container) return true;
+  const distance=container.scrollHeight-container.scrollTop-container.clientHeight;
+  return distance<=LOG_SCROLL_THRESHOLD;
+}
+
+function updateLogScrollState(container){
+  if(!container) return;
+  const sticky=isNearLogBottom(container);
+  logAutoScroll=sticky;
+  if(sticky){
+    delete container.dataset.paused;
+    container.removeAttribute('data-paused');
+  }else{
+    container.dataset.paused='true';
+  }
+}
+
+function setupLogScrollHandling(){
+  const container=e('log');
+  if(!container) return;
+  updateLogScrollState(container);
+  container.addEventListener('scroll',()=>{
+    updateLogScrollState(container);
+  });
+}
+
 function ap(raw){
   const container=e('log');
   if(!container) return;
@@ -119,7 +148,12 @@ function ap(raw){
     const first=container.firstElementChild;
     if(first) container.removeChild(first);
   }
-  container.scrollTop=container.scrollHeight;
+  if(logAutoScroll||isNearLogBottom(container)){
+    container.scrollTop=container.scrollHeight;
+    logAutoScroll=true;
+    delete container.dataset.paused;
+    container.removeAttribute('data-paused');
+  }
 }
 
 function formatDuration(seconds){
@@ -664,6 +698,7 @@ async function boot(){
   startUsagePolling();
 }
 async function refresh(){ await wallet(); await kpi(); await leader(); await riskStats(); await loadStrategy() }
+setupLogScrollHandling();
 boot(); setInterval(refresh, REFRESH_INTERVAL)
 
 e('riskSel').onchange=()=>{ const v=e('riskSel').value; e('riskDesc').textContent=describeRisk(v)}

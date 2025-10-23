@@ -6,6 +6,7 @@ from .runtime import log
 _last_call_ts = {}  # key -> ts
 _usage_cache: Dict[str, Any] = {"data": None, "fingerprint": None}
 _last_usage_log_ts: float = 0.0
+_last_usage_error_ts: float = 0.0
 _balance_cache: Dict[str, int] = {}
 
 def _allow(key: str, *, gap: Optional[int] = None) -> bool:
@@ -182,7 +183,7 @@ def _format_usage_summary(payload: Optional[Dict[str, Any]]) -> str:
 def current_cu_usage(force: bool = False) -> Optional[Dict[str, Any]]:
     """Return Moralis Current CU Usage with basic caching and logging."""
 
-    global _last_usage_log_ts
+    global _last_usage_log_ts, _last_usage_error_ts
 
     if not settings.MORALIS_API_KEY:
         log("[MORALIS][ERR] usage: MORALIS_API_KEY missing")
@@ -200,29 +201,53 @@ def current_cu_usage(force: bool = False) -> Optional[Dict[str, Any]]:
         return cache
 
     endpoints = (
-        "https://deep-index.moralis.io/api/v2.2/info/usage",
-        "https://deep-index.moralis.io/api/v2/info/usage",
+        ("https://deep-index.moralis.io/api/v2.2/info/usage", {"type": "evm"}),
+        ("https://deep-index.moralis.io/api/v2/info/usage", {"type": "evm"}),
+        ("https://deep-index.moralis.io/api/v2.2/info/usage", None),
+        ("https://deep-index.moralis.io/api/v2/info/usage", None),
     )
     last_error: Optional[Exception] = None
-    for url in endpoints:
-        try:
-            with _client() as c:
-                r = c.get(url)
-                r.raise_for_status()
-                raw = r.json()
-        except Exception as e:
-            last_error = e
-            continue
-        else:
-            fields = _normalize_usage_payload(raw)
-            payload = {"fetched_at": now, **fields, "raw": raw, "endpoint": url}
-            fingerprint = _usage_fingerprint(payload)
-            _usage_cache.update({"data": payload, "fingerprint": fingerprint})
-            summary = _format_usage_summary(payload)
-            log(f"[MORALIS][USAGE] Current CU Usage: {summary}")
-            _last_usage_log_ts = now
-            return payload
+    last_status: Optional[int] = None
+    try:
+        with _client() as c:
+            for url, params in endpoints:
+                try:
+                    r = c.get(url, params=params or None)
+                    if r.status_code == 204:
+                        continue
+                    r.raise_for_status()
+                    raw = r.json()
+                except httpx.HTTPStatusError as exc:
+                    last_error = exc
+                    last_status = exc.response.status_code if exc.response is not None else None
+                    if last_status == 404:
+                        continue
+                    continue
+                except Exception as exc:
+                    last_error = exc
+                    last_status = None
+                    continue
+                else:
+                    fields = _normalize_usage_payload(raw)
+                    payload = {"fetched_at": now, **fields, "raw": raw, "endpoint": url, "params": params or {}}
+                    fingerprint = _usage_fingerprint(payload)
+                    _usage_cache.update({"data": payload, "fingerprint": fingerprint})
+                    summary = _format_usage_summary(payload)
+                    log(f"[MORALIS][USAGE] Current CU Usage: {summary}")
+                    _last_usage_log_ts = now
+                    _last_usage_error_ts = now
+                    return payload
+    except Exception as exc:
+        last_error = exc
+        last_status = None
 
-    if last_error:
+    if last_status == 404:
+        if now - _last_usage_error_ts >= 60.0:
+            log("[MORALIS][WARN] usage endpoint returned 404 — возможно, функция не доступна для вашего ключа")
+            _last_usage_error_ts = now
+        return cache
+
+    if last_error and now - _last_usage_error_ts >= 30.0:
         log(f"[MORALIS][ERR] usage fetch failed: {last_error}")
+        _last_usage_error_ts = now
     return cache
