@@ -14,6 +14,8 @@ from ..config import (
 from ..executor import Web3Helper, LiveNotConfigured
 from ..engine import Engine
 from ..moralis_api import native_balance, ping as moralis_ping, current_cu_usage
+from ..pricing import price_usd
+from .. import paper_wallet
 import os, json, time
 
 app = FastAPI()
@@ -79,7 +81,16 @@ def api_wallet():
         eth = bwei_m/1e18 if bwei_m else 0.0
         src="moralis"
     symbol = native_symbol(settings.CHAIN)
-    return {
+    px = price_usd(settings.CHAIN)
+    if settings.MODE == "paper":
+        paper_wallet.bootstrap(eth, price=px, symbol=symbol)
+        snapshot = paper_wallet.snapshot(price=px, symbol=symbol)
+        eth = snapshot.get("balance_native", eth) or 0.0
+        positions = snapshot.get("positions", [])
+        src = "paper"
+    else:
+        positions = []
+    result = {
         "ts": time.time(),
         "eth": eth,
         "balance": eth,
@@ -89,6 +100,21 @@ def api_wallet():
         "rpc": used,
         "source": src,
     }
+    if settings.MODE == "paper":
+        snapshot = paper_wallet.snapshot(price=px, symbol=symbol)
+        result.update(
+            {
+                "paper": True,
+                "balance_usd": snapshot.get("balance_usd"),
+                "initial_native": snapshot.get("initial_native"),
+                "initial_usd": snapshot.get("initial_usd"),
+                "pnl_native": snapshot.get("pnl_native"),
+                "pnl_usd": snapshot.get("pnl_usd"),
+                "collection": positions,
+                "collection_count": len(positions),
+            }
+        )
+    return result
 
 @app.post("/api/balance_source_set")
 def api_balance_source_set(body: dict = Body(...)):

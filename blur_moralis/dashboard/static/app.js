@@ -492,6 +492,13 @@ async function wallet(){ const w=await jget('/api/wallet');
     if(w.source){ srcEl.textContent='src: '+w.source; srcEl.style.display='inline-block'; }
     else{ srcEl.textContent=''; srcEl.style.display='none'; }
   }
+  const collectionEl=e('collectionCount');
+  if(collectionEl){
+    let count=null;
+    if(Number.isFinite(Number(w.collection_count))){ count=Number(w.collection_count); }
+    else if(Array.isArray(w.collection)){ count=w.collection.length; }
+    collectionEl.textContent=(count!=null && Number.isFinite(count))?count:'—';
+  }
 }
 
 async function kpi(){ const j=await jget('/api/kpi'); const m=j.kpi||{};
