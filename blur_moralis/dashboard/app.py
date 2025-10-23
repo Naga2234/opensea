@@ -179,13 +179,20 @@ def api_preset_lowcap_polygon():
         "RPC_URL":"https://polygon-rpc.com",
         "RPC_URLS": '["https://polygon-rpc.com","https://rpc.ankr.com/polygon"]',
         "POSITION_FRACTION":"0.005",
-        "POSITION_USD_CEIL":"9",
+        "POSITION_USD_CEIL":"12",
         "MAX_SPEND_USD_PER_DAY":"8",
         "MAX_OPEN_POSITIONS":"2",
-        "USD_PROFIT_MIN":"0.02",
+        "USD_PROFIT_MIN":"0.03",
+        "EDGE_MIN_PCT":"3.0",
+        "WINDOW_MINUTES":"60",
+        "MIN_TRADES_IN_WINDOW":"5",
+        "MIN_UNIQUE_BUYERS":"3",
+        "MIN_VOLUME_USD_WINDOW":"100",
         "GAS_MAX_FEE_GWEI":"80",
         "GAS_PRIORITY_GWEI":"2.0",
+        "GAS_QUANTILE_MAX":"0.30",
         "RISK_PROFILE":"balanced",
+        "MORALIS_TRADES_CHAIN":"polygon",
         "CONTRACTS": '["0x86935F11C86623deC8a25696E1C19a8659CbF95d","0x67F4732266C7300cca593C814d46bee72e40659F","0xE28D2D8746D855251BA677a91626009CB33aA4F9","0x670fd103b1a08628e9557cD66B87DeD841115190"]'
     }
     for k,v in pairs.items(): setattr(settings, k, v)
@@ -278,6 +285,13 @@ def api_risk_mode_set(body: dict = Body(...)):
             "GAS_MAX_FEE_GWEI":"50",
             "GAS_PRIORITY_GWEI":"1.0",
             "MORALIS_RATE_LIMIT_SEC":"120",
+            "EDGE_MIN_PCT":"3.0",
+            "WINDOW_MINUTES":"60",
+            "MIN_TRADES_IN_WINDOW":"5",
+            "MIN_UNIQUE_BUYERS":"3",
+            "MIN_VOLUME_USD_WINDOW":"100",
+            "GAS_QUANTILE_MAX":"0.30",
+            "MORALIS_TRADES_CHAIN":"polygon",
         }
     elif mode=="aggressive":
         pairs={
@@ -290,18 +304,32 @@ def api_risk_mode_set(body: dict = Body(...)):
             "GAS_MAX_FEE_GWEI":"80",
             "GAS_PRIORITY_GWEI":"2.0",
             "MORALIS_RATE_LIMIT_SEC":"60",
+            "EDGE_MIN_PCT":"3.0",
+            "WINDOW_MINUTES":"60",
+            "MIN_TRADES_IN_WINDOW":"5",
+            "MIN_UNIQUE_BUYERS":"3",
+            "MIN_VOLUME_USD_WINDOW":"100",
+            "GAS_QUANTILE_MAX":"0.30",
+            "MORALIS_TRADES_CHAIN":"polygon",
         }
     else: # balanced
         pairs={
             "RISK_PROFILE":"balanced",
             "POSITION_FRACTION":"0.005",
-            "POSITION_USD_CEIL":"9",
+            "POSITION_USD_CEIL":"12",
             "MAX_SPEND_USD_PER_DAY":"8",
             "MAX_OPEN_POSITIONS":"2",
-            "USD_PROFIT_MIN":"0.02",
+            "USD_PROFIT_MIN":"0.03",
             "GAS_MAX_FEE_GWEI":"80",
             "GAS_PRIORITY_GWEI":"2.0",
             "MORALIS_RATE_LIMIT_SEC":"45",
+            "EDGE_MIN_PCT":"3.0",
+            "WINDOW_MINUTES":"60",
+            "MIN_TRADES_IN_WINDOW":"5",
+            "MIN_UNIQUE_BUYERS":"3",
+            "MIN_VOLUME_USD_WINDOW":"100",
+            "GAS_QUANTILE_MAX":"0.30",
+            "MORALIS_TRADES_CHAIN":"polygon",
         }
     for k,v in pairs.items(): setattr(settings,k, v if not k.endswith("_SEC") and not k.endswith("_POSITIONS") else int(v) if v.isdigit() else v)
     _save_env(pairs)
