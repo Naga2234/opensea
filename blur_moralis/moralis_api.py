@@ -9,6 +9,16 @@ _last_usage_log_ts: float = 0.0
 _last_usage_error_ts: float = 0.0
 _balance_cache: Dict[str, int] = {}
 
+_BALANCE_ENDPOINTS = (
+    "https://deep-index.moralis.io/api/v2.2/{address}/balance",
+    "https://deep-index.moralis.io/api/v2/{address}/balance",
+)
+
+_TRADES_ENDPOINTS = (
+    "https://deep-index.moralis.io/api/v2.2/nft/{address}/trades",
+    "https://deep-index.moralis.io/api/v2/nft/{address}/trades",
+)
+
 def _allow(key: str, *, gap: Optional[int] = None) -> bool:
     now=time.time()
     gap = gap if gap is not None else max(5, int(getattr(settings, "MORALIS_RATE_LIMIT_SEC", 60)))
@@ -40,18 +50,44 @@ def native_balance(address:str)->Optional[int]:
         return cached
     if not _allow(key):
         return cached  # skip to save CU
+    last_error: Optional[Exception] = None
+    last_status: Optional[int] = None
+    params = {"chain": _chain_param()}
     try:
         with _client() as c:
-            r=c.get(f"https://deep-index.moralis.io/api/v2/{address}/balance", params={"chain": _chain_param()})
-            r.raise_for_status()
-            data=r.json()
-            bal=int(data.get("balance") or 0)
-            log(f"[MORALIS] balance ok {address[:8]}… -> {bal}")
-            _balance_cache[key]=bal
-            return bal
-    except Exception as e:
-        log(f"[MORALIS][ERR] balance: {e}")
-        return cached
+            for endpoint in _BALANCE_ENDPOINTS:
+                url = endpoint.format(address=address)
+                try:
+                    r = c.get(url, params=params)
+                    if r.status_code == 404:
+                        last_status = 404
+                        continue
+                    r.raise_for_status()
+                except httpx.HTTPStatusError as exc:
+                    last_error = exc
+                    last_status = exc.response.status_code if exc.response is not None else None
+                    if last_status == 404:
+                        continue
+                    break
+                except Exception as exc:
+                    last_error = exc
+                    last_status = None
+                    break
+                else:
+                    data = r.json()
+                    bal = int(data.get("balance") or 0)
+                    log(f"[MORALIS] balance ok {address[:8]}… -> {bal} via {url}")
+                    _balance_cache[key] = bal
+                    return bal
+    except Exception as exc:
+        last_error = exc
+        last_status = None
+
+    if last_status == 404:
+        log(f"[MORALIS][WARN] balance endpoint not found for {address[:8]}… — пробую кэш")
+    elif last_error:
+        log(f"[MORALIS][ERR] balance: {last_error}")
+    return cached
 
 def recent_trades(contract:str, limit:int=2)->List[Dict[str,Any]]:
     """
@@ -61,18 +97,43 @@ def recent_trades(contract:str, limit:int=2)->List[Dict[str,Any]]:
     key=f"trades:{contract}:{_chain_param()}"
     if not _allow(key):
         return []
+    params = {"chain": _chain_param(), "marketplace": "opensea", "limit": limit}
+    last_error: Optional[Exception] = None
+    last_status: Optional[int] = None
     try:
         with _client() as c:
-            r=c.get(f"https://deep-index.moralis.io/api/v2/nft/{contract}/trades",
-                    params={"chain": _chain_param(), "marketplace": "opensea", "limit": limit})
-            r.raise_for_status()
-            data=r.json()
-            items=data.get("result") or data.get("trades") or []
-            log(f"[MORALIS] trades {contract[:8]}… -> {len(items)}")
-            return items[:limit]
-    except Exception as e:
-        log(f"[MORALIS][ERR] trades: {e}")
-        return []
+            for endpoint in _TRADES_ENDPOINTS:
+                url = endpoint.format(address=contract)
+                try:
+                    r = c.get(url, params=params)
+                    if r.status_code == 404:
+                        last_status = 404
+                        continue
+                    r.raise_for_status()
+                except httpx.HTTPStatusError as exc:
+                    last_error = exc
+                    last_status = exc.response.status_code if exc.response is not None else None
+                    if last_status == 404:
+                        continue
+                    break
+                except Exception as exc:
+                    last_error = exc
+                    last_status = None
+                    break
+                else:
+                    data = r.json()
+                    items = data.get("result") or data.get("trades") or []
+                    log(f"[MORALIS] trades {contract[:8]}… -> {len(items)} via {url}")
+                    return items[:limit]
+    except Exception as exc:
+        last_error = exc
+        last_status = None
+
+    if last_status == 404:
+        log(f"[MORALIS][WARN] trades endpoint not found for {contract[:8]}…")
+    elif last_error:
+        log(f"[MORALIS][ERR] trades: {last_error}")
+    return []
 
 def ping()->bool:
     """
@@ -202,8 +263,10 @@ def current_cu_usage(force: bool = False) -> Optional[Dict[str, Any]]:
 
     endpoints = (
         ("https://deep-index.moralis.io/api/v2.2/info/usage", {"type": "evm"}),
+        ("https://deep-index.moralis.io/api/v2.2/info/web3-api-usage", {"type": "evm"}),
         ("https://deep-index.moralis.io/api/v2/info/usage", {"type": "evm"}),
         ("https://deep-index.moralis.io/api/v2.2/info/usage", None),
+        ("https://deep-index.moralis.io/api/v2.2/info/web3-api-usage", None),
         ("https://deep-index.moralis.io/api/v2/info/usage", None),
     )
     last_error: Optional[Exception] = None
