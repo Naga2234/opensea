@@ -26,12 +26,12 @@ class Settings(BaseSettings):
         "\"https://site2.moralis-nodes.com/eth/231746d238334c139d70af0f910d5563\"]"
     )
     BALANCE_SOURCE: str = "auto"  # auto | rpc | moralis
-    POSITION_FRACTION: float = 0.005
-    POSITION_USD_CEIL: float = 12.0
-    MAX_SPEND_USD_PER_DAY: float = 8.0
-    MAX_OPEN_POSITIONS: int = 2
-    USD_PROFIT_MIN: float = 0.03
-    EDGE_MIN_PCT: float = 3.0
+    POSITION_FRACTION: float = 0.25
+    POSITION_USD_CEIL: float = 3.0
+    MAX_SPEND_USD_PER_DAY: float = 2.0
+    MAX_OPEN_POSITIONS: int = 1
+    USD_PROFIT_MIN: float = 0.01
+    EDGE_MIN_PCT: float = 2.7
     WINDOW_MINUTES: int = 60
     MIN_TRADES_IN_WINDOW: int = 5
     MIN_UNIQUE_BUYERS: int = 3
